@@ -82,7 +82,7 @@ local overT = text("TextLabel", over, "", UDim2.fromScale(0.9, 0.3), UDim2.fromS
 local overR = text("TextLabel", over, "", UDim2.fromScale(0.9, 0.3), UDim2.fromScale(0.05, 0.36), Color3.fromRGB(140, 255, 140)) overR.ZIndex = 6
 local cont = btn(over, "Continue", UDim2.fromScale(0.5, 0.2), UDim2.fromScale(0.25, 0.74), Color3.fromRGB(50, 160, 70)) cont.ZIndex = 6
 
-local state, target
+local battle, target
 local function call(...)
 	local ok, res = BattleAction:InvokeServer(...)
 	if not ok then msg.Text = res return nil end
@@ -119,32 +119,32 @@ end
 
 function render()
 	for _, f in { enemyRow, teamRow, actions } do for _, ch in f:GetChildren() do if ch:IsA("GuiObject") then ch:Destroy() end end end
-	if not state then return end
-	local units = state.units
+	if not battle then return end
+	local units = battle.units
 	if not (target and units[target] and units[target].alive and units[target].side == "enemy") then
 		target = nil
 		for i, u in units do if u.side == "enemy" and u.alive then target = i break end end
 	end
-	for i, u in units do card(u.side == "enemy" and enemyRow or teamRow, u, i, i == state.active and not state.over) end
-	title.Text = state.stage .. "  •  Round " .. state.round
+	for i, u in units do card(u.side == "enemy" and enemyRow or teamRow, u, i, i == battle.active and not battle.over) end
+	title.Text = battle.stage .. "  •  Round " .. battle.round
 	local logs = {}
-	for k = math.max(1, #state.log - 4), #state.log do table.insert(logs, state.log[k]) end
+	for k = math.max(1, #battle.log - 4), #battle.log do table.insert(logs, battle.log[k]) end
 	logL.Text = table.concat(logs, "\n")
-	over.Visible = state.over
-	if state.over then
-		overT.Text = state.winner == "player" and "VICTORY!" or "DEFEAT"
-		overT.TextColor3 = state.winner == "player" and Color3.fromRGB(255, 220, 80) or Color3.fromRGB(255, 90, 90)
-		overR.Text = state.rewards and #state.rewards > 0 and ("Rewards: " .. table.concat(state.rewards, ", ")) or "No rewards"
+	over.Visible = battle.over
+	if battle.over then
+		overT.Text = battle.winner == "player" and "VICTORY!" or "DEFEAT"
+		overT.TextColor3 = battle.winner == "player" and Color3.fromRGB(255, 220, 80) or Color3.fromRGB(255, 90, 90)
+		overR.Text = battle.rewards and #battle.rewards > 0 and ("Rewards: " .. table.concat(battle.rewards, ", ")) or "No rewards"
 		turnL.Text = ""
 		return
 	end
-	local me = units[state.active]
+	local me = units[battle.active]
 	turnL.Text = "Your turn: " .. me.name .. "  •  tap an enemy to target it"
 	local function act(label, action, enabled, color)
 		local b = btn(actions, label, UDim2.fromOffset(150, 64), UDim2.new(), enabled and color or Color3.fromRGB(70, 70, 80))
 		b.MouseButton1Click:Connect(function()
 			local res = call("act", action, target)
-			if res then state = res render() end
+			if res then battle = res render() end
 		end)
 	end
 	act("Attack", "attack", true, Color3.fromRGB(220, 80, 60))
@@ -188,7 +188,7 @@ local function refreshStages()
 				if not unlocked then stageMsg.Text = dieOk and "Clear the previous stage first" or ("Buy the " .. Dice.ById[region.requiresDie].name .. " first") return end
 				local ok, res = BattleAction:InvokeServer("start", st.id)
 				if not ok then stageMsg.Text = res return end
-				state, target = res, nil
+				battle, target = res, nil
 				stages.Visible = false
 				screen.Visible = true
 				render()
@@ -201,7 +201,7 @@ state:GetAttributeChangedSignal("BattleProgress"):Connect(function() if stages.V
 
 local function leave()
 	BattleAction:InvokeServer("leave")
-	state = nil
+	battle = nil
 	screen.Visible = false
 	refreshStages()
 	stages.Visible = true

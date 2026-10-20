@@ -121,9 +121,27 @@ local function proxy(path)
 	return setmetatable({}, { __index = function(_, k) return proxy(path .. "." .. k) end, __tostring = function() return path end })
 end
 local Enum = proxy("Enum")
-local UDim2 = { new = function(...) return { ... } end, fromScale = function(...) return { ... } end, fromOffset = function(...) return { ... } end }
-local UDim = { new = function(...) return { ... } end }
-local Vector2 = { new = function(x, y) return { X = x, Y = y } end }
+local function ud(sc, of) return { Scale = sc or 0, Offset = of or 0 } end
+local UDim2 = {
+	new = function(xs, xo, ys, yo) return { X = ud(xs, xo), Y = ud(ys, yo) } end,
+	fromScale = function(xs, ys) return { X = ud(xs, 0), Y = ud(ys, 0) } end,
+	fromOffset = function(xo, yo) return { X = ud(0, xo), Y = ud(0, yo) } end,
+}
+local UDim = { new = ud }
+local function seq(...) return { ... } end
+local ColorSequence, NumberSequence, NumberRange = { new = seq }, { new = seq }, { new = seq }
+local TweenInfo = { new = seq }
+local V2mt = {}
+local Vector2 = { new = function(x, y) return setmetatable({ X = x or 0, Y = y or 0 }, V2mt) end }
+local function v2op(f) return function(a, b)
+	local ax, ay = type(a) == "number" and a or a.X, type(a) == "number" and a or a.Y
+	local bx, by = type(b) == "number" and b or b.X, type(b) == "number" and b or b.Y
+	return Vector2.new(f(ax, bx), f(ay, by))
+end end
+V2mt.__add = v2op(function(x, y) return x + y end)
+V2mt.__sub = v2op(function(x, y) return x - y end)
+V2mt.__mul = v2op(function(x, y) return x * y end)
+V2mt.__div = v2op(function(x, y) return x / y end)
 
 -- INSTANCES
 local Inst = {}
@@ -133,7 +151,7 @@ local IsA = {
 	TextLabel = { GuiObject = true }, TextButton = { GuiObject = true, GuiButton = true }, Frame = { GuiObject = true },
 	NumberValue = { ValueBase = true }, IntValue = { ValueBase = true },
 }
-local EVENTS = { PlayerMembershipChanged = true, PromptGamePassPurchaseFinished = true, OnClientEvent = true, Triggered = true, CharacterAdded = true, Event = true, Destroying = true, DescendantAdded = true, PlayerAdded = true, PlayerRemoving = true }
+local EVENTS = { MouseButton1Click = true, MouseEnter = true, FocusLost = true, Ended = true, PromptTriggered = true, InputBegan = true, Heartbeat = true, PlayerMembershipChanged = true, PromptGamePassPurchaseFinished = true, OnClientEvent = true, Triggered = true, CharacterAdded = true, Event = true, Destroying = true, DescendantAdded = true, PlayerAdded = true, PlayerRemoving = true }
 local Methods = {}
 local function newInst(class, name)
 	local o = { ClassName = class, Name = name or class, _kids = {}, _attrs = {}, _asig = {}, _ev = {} }
@@ -234,6 +252,12 @@ function Methods:GetBoundingBox() return self:GetPivot(), Vector3new(4, 4, 4) en
 function Methods:ScaleTo() end
 function Methods:GetScale() return 1 end
 function Methods:Fire(...) self.Event:Fire(...) end
+function Methods:GetPropertyChangedSignal(k) return Methods.GetAttributeChangedSignal(self, "prop:" .. k) end
+function Methods:Play() end
+function Methods:GetServerTimeNow() return R.timeOffset + now end
+function Methods:InvokeServer(...)
+	return self.OnServerInvoke(R.localPlayer, ...)
+end
 function Methods:Kick(msg) rawset(self, "kicked", msg or true) R.leave(self) end
 function Methods:Clone() local c = newInst(self.ClassName, self.Name) return c end
 function Methods:Invoke(...) return self.OnInvoke(...) end
@@ -342,6 +366,10 @@ local SS = svc("ServerStorage")
 local SSS = svc("ServerScriptService")
 svc("RunService").IsStudio = function() return R.studio == true end
 svc("Debris").AddItem = function(_, inst, t) task.delay(t, function() inst:Destroy() end) end
+svc("ProximityPromptService") svc("UserInputService") svc("Lighting") svc("SocialService") svc("StarterGui")
+services.TweenService = newInst("TweenService", "TweenService")
+services.TweenService.Create = function() return { Play = function() end, Completed = newSignal() } end
+services.SocialService.CanSendGameInviteAsync = function() return false end
 svc("CollectionService").AddTag = function() end
 local guid = 0
 svc("HttpService").JSONEncode = function(_, v) return encode(v) end
@@ -376,6 +404,12 @@ mps.UserOwnsGamePassAsync = function() return false end
 mps.PromptGamePassPurchase = function() end
 mps.PromptProductPurchase = function() end
 rawget(mps, "_ev").PromptGamePassPurchaseFinished = newSignal()
+mps.GetProductInfo = function() return { PriceInRobux = 99 } end
+local cam = newInst("Camera", "Camera")
+rawset(cam, "ViewportSize", Vector2.new(1280, 720))
+rawset(cam, "CFrame", cfnew(0, 10, 0))
+cam.Parent = workspace
+rawset(workspace, "CurrentCamera", cam)
 local playerList = {}
 function Players:GetPlayerByUserId(id) for _, p in playerList do if p.UserId == id and p.Parent then return p end end return nil end
 function Players:GetPlayers() local o = {} for _, p in playerList do if p.Parent then table.insert(o, p) end end return o end
@@ -425,7 +459,7 @@ end
 local ann = newInst("RemoteEvent", "Announce")
 ann.Parent = mon
 R.announced = {}
-function Methods:FireAllClients(...) table.insert(R.announced, { ... }) end
+function Methods:FireAllClients(...) table.insert(R.announced, { ... }) self.OnClientEvent:Fire(...) end
 function Methods:FireClient(...) end
 for _, n in { "DataService", "DataSchema", "Game", "Guard", "BattleEngine" } do module(SSS, n, ROOT .. "server/" .. n .. ".luau") end
 local tests = newInst("Folder", "Tests")
@@ -434,7 +468,8 @@ for _, n in { "RollSpec", "BattleSpec", "ProgressionSpec", "RunAll" } do module(
 
 env = setmetatable({
 	game = game, workspace = workspace, Instance = Instance, Vector3 = Vector3, Vector2 = Vector2, CFrame = CFrame, Color3 = Color3,
-	Enum = Enum, UDim2 = UDim2, UDim = UDim, task = task, os = fakeOs, require = req, typeof = function(v)
+	Enum = Enum, UDim2 = UDim2, UDim = UDim, task = task, ColorSequence = ColorSequence, NumberSequence = NumberSequence,
+	NumberRange = NumberRange, TweenInfo = TweenInfo, os = fakeOs, require = req, typeof = function(v)
 		local mt = getmetatable(v)
 		if mt == Inst then return "Instance" elseif mt == V3 then return "Vector3" elseif mt == CF then return "CFrame" end
 		return type(v)
@@ -466,6 +501,13 @@ function R.leave(p)
 	if not p.Parent then return end
 	Players.PlayerRemoving:Fire(p)
 	task.defer(function() p.Parent = nil end)
+end
+-- client scripts run as R.localPlayer (Players.LocalPlayer)
+function R.runClient(path, name, player)
+	R.localPlayer = player
+	rawset(Players, "LocalPlayer", player)
+	local s = newInst("LocalScript", name)
+	task.spawn(function() load(path, s) end)
 end
 function R.state(p) return p.PlayerGui:FindFirstChild("State") end
 function R.attr(p, k)

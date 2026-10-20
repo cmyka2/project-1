@@ -1,8 +1,9 @@
 # What other RNG games do (and what we took)
 
-Two research passes.
+Three research passes.
 - **Pass 1:** the RNG genre in general (roll games, collect-and-hatch, farming).
 - **Pass 2:** the closer subgenre, "roll characters that earn money". You roll or spin for units, place them on your base, and they make cash per second.
+- **Pass 3:** why games in this style keep players: onboarding, the first minutes, session length and day-1/day-7 return. Sources are Roblox devforum postmortems and retention guides, not individual games.
 
 ## Scope and limits
 
@@ -12,6 +13,28 @@ I can't play Roblox games or watch gameplay, so these notes don't cover anything
 - **Collect-and-hatch / farming games:** Pets Go, Pet Simulator 99, Grow a Garden, Fisch, Anime Vanguards, Steal a Brainrot
 
 Prices and numbers below are snapshots from those sources and change often.
+
+## Pass 3: what keeps players (onboarding and retention)
+
+The devforum threads tell the same story: simulators lose about half of new players in the first 2 minutes when the first action isn't obvious, and lose the rest at the first slow wall. The fixes they report are all small.
+
+| Finding | Source | What we did |
+|---|---|---|
+| **First reward within seconds.** No reading before the first roll | devforum day-1 retention threads, rolearn first-week guide | ROLL is a big button on screen from spawn (also R key). The first roll auto-places onto your base, so you earn cash before opening any menu. |
+| **Point at the next goal, don't lock players in a tutorial** | devforum onboarding threads, Onboard framework release, 3D tutorial-arrow kits | **Guide:** a tip line plus a glowing beam to wherever the current quest happens. It disappears after the first rebirth. |
+| **Remove busywork from the core loop** | Anime Dice and Pets Go "equip best" buttons; devforum simulator threads | **⭐ PLACE BEST** fills every slot with your top earners. **Auto-place** (on by default, toggle in Settings) puts each new roll into an empty slot. |
+| **Reasons to stay longer this session** | devforum "playtime gift rewards" threads, Pet Simulator / Anime Dice gift timers | **Playtime gifts** at 2, 5, 10, 15, 20, 30, 45 and 60 minutes. A red **!** badge shows when one is ready. |
+| **Reasons to return tomorrow** | rolearn 7-day-cliff, creation.dev retention glossary | Already had a daily streak and quests. Added red **!** badges on DAILY so it's noticed. |
+| **Social pull** | creation.dev simulator guide, devforum session-time threads | Friend boost (pass 2), plus an **INVITE** button and an optional **group bonus** (+10% luck, needs `GROUP_ID`). |
+| **Celebrate milestones loudly** | devforum engagement threads | **Confetti** on quest and milestone rewards; rare rolls already get the reveal cutscene and server announcements. |
+| **Pacing: first rebirth fast, then real walls** | creation.dev rebirth glossary, Anime Dice rebirth-timing guides | **Pacing sim** (`tools/headless/pacing.luau`) plays a greedy free player through the real formulas. It found the first rebirth at under 4 minutes, chained rebirths, and floor 3 unreachable under the cash cap. After retuning: first rebirth at about **14 min**, floor 2 at about **2 h**, floor 3 at about **9 h**. |
+
+### Not taken from pass 3
+
+| Idea | Why not |
+|---|---|
+| **Forced step-by-step tutorial** | Several threads say forced tutorials lose more players than they help in simulators. The guide points but never blocks. |
+| **Loading-screen ads / "like the game" prompts at join** | Friction before the first reward. |
 
 ## Pass 2: roll-and-earn games
 
@@ -99,6 +122,26 @@ This cloud session couldn't open Roblox's documentation site directly; the rules
 Spec §3.4 originally said the premium shop must never sell randomized paid rewards or let purchases affect competitive results. Selling luck is a deliberate change requested by the project owner. Leaderboards stay as they are: earnings, rebirths, unique monsters and battle progress.
 
 ## Sources
+
+### Pass 3
+
+- [Day-1 retention: losing half of players in under 2 minutes (devforum)](https://devforum.roblox.com/t/my-day-1-retention-is-awful-23-losing-half-my-players-in-under-2-minutes-what-am-i-doing-wrong-with-onboarding/4186434)
+- [Improving new user engagement (devforum)](https://devforum.roblox.com/t/improving-new-user-engagement-on-my-game/2947546)
+- [Increasing retention and engagement in a simulator (devforum)](https://devforum.roblox.com/t/how-to-increase-retention-engagement-etc-in-a-simulator/3292053)
+- [Increasing session time and retention (devforum)](https://devforum.roblox.com/t/how-could-we-increase-session-time-and-retention-in-our-game/3562509)
+- [Suggestions for session time and retention (devforum)](https://devforum.roblox.com/t/suggestions-for-increasing-session-time-and-retention/3842442)
+- [Tips on retention and progression (devforum)](https://devforum.roblox.com/t/i-need-tips-on-making-my-game-retention-and-progression-better/3868947)
+- [Low retention and session time (devforum)](https://devforum.roblox.com/t/game%E2%80%99s-retention-and-average-session-time-extremely-low/4269329)
+- [Qualified play-through rate (devforum)](https://devforum.roblox.com/t/retention-qualified-playtroughrate-killing-my-game/4558372)
+- [Playtime gift rewards (devforum)](https://devforum.roblox.com/t/help-with-playtime-gift-rewards/2644815)
+- [Onboard tutorial framework (devforum)](https://devforum.roblox.com/t/release-onboard-%E2%80%94-modern-lightweight-onboarding-tutorial-framework/4751478)
+- [Auto and triple hatch (devforum)](https://devforum.roblox.com/t/how-to-correctly-introduce-an-auto-hatch-and-triple-hatch-system-in-this-script/2059150)
+- [First-week retention optimization (rolearn)](https://rolearn.dev/guidance/first-week-retention-optimization)
+- [Player engagement and retention (rolearn)](https://rolearn.dev/guidance/player-engagement-retention)
+- [The 7-day retention cliff (rolearn)](https://rolearn.dev/insights/player-retention-7day-cliff)
+- [Roblox simulator game guide (creation.dev)](https://www.creation.dev/blog/roblox-simulator-game-guide)
+- [Player retention (creation.dev)](https://www.creation.dev/glossary/player-retention)
+- [Rebirth (creation.dev)](https://www.creation.dev/glossary/rebirth)
 
 ### Pass 2
 

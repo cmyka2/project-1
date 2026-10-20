@@ -12,8 +12,10 @@ What *has* been run, on a Luau host outside Roblox (`tools/headless`):
 |---|---|
 | `check.luau` | Every `.luau` file under `src/` compiles (syntax only, no type check). |
 | `specs.luau` | The Studio specs in `ServerStorage/Tests` all pass: **RollSpec**, **BattleSpec** and **ProgressionSpec**. |
-| `sim.luau` | The **real** server scripts run on a mock engine (161/161 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, MonetizationService, PlotAssigner. |
+| `sim.luau` | The **real** server scripts run on a mock engine (167/167 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, MonetizationService, PlotAssigner. |
 | `fallback.luau` | With an empty workspace, HubFallback builds every hub piece and a roll works. |
+| `smoke.luau` | **Client smoke test.** Runs the server scripts plus all 15 client scripts on the mock. It rolls, fires every hub prompt and clicks every button (788 clicks over 3 rounds). Result: 0 runtime errors. It found and fixed one real bug: BattleUI shadowed its `State` object, so stage refreshes would have errored. |
+| `pacing.luau` | **Economy pacing.** A greedy free player (no passes, gear or events) plays through the real formulas. First rebirth comes at about 14 min, floor 2 at about 2 h, floor 3 at about 9 h. |
 
 The specs cover:
 - **RollSpec:** RNG normalization, die eligibility, extreme luck, invalid weights, exact luck multipliers, biome boosts, chest luck, gear power.
@@ -35,7 +37,7 @@ The sim walks the §24 flow plus:
 - Robux shop: pass ownership, receipt dedupe, server luck, region restriction, lucky/golden/triple rolls, codes, settings
 - session lock, DataStore outage, migration, newer-schema refusal, stolen lock, shutdown
 
-The mock (`tools/headless/mockrbx.luau`) is a stand-in for the engine, not the engine itself. It does **not** model replication, real DataStore/OrderedDataStore limits or throttling, MarketplaceService, physics, rendering, ProximityPrompt range, or anything on the client. **No client UI has been executed anywhere**, mock included.
+The mock (`tools/headless/mockrbx.luau`) is a stand-in for the engine, not the engine itself. It does **not** model replication, real DataStore/OrderedDataStore limits or throttling, MarketplaceService, physics, rendering, layout or ProximityPrompt range. The client smoke test only proves the UI scripts run and their buttons don't throw. **Nobody has seen the UI**: layout, overlap, readability and feel are unchecked until a Studio playtest.
 
 ### Run it
 
@@ -64,6 +66,8 @@ $B tools/headless/check.luau $(find src -name '*.luau')
 $B tools/headless/specs.luau
 $B tools/headless/sim.luau
 $B tools/headless/fallback.luau
+$B tools/headless/smoke.luau
+$B tools/headless/pacing.luau 10   # hours to simulate
 ```
 
 ## Acceptance criteria (spec §24)
@@ -133,7 +137,7 @@ Every row is pending a Studio playtest.
   2. Paste the ids into the config, and paste each image id into `image` for in-game icons.
 - **Pity counters.** Not added (see `docs/RESEARCH.md`).
 - **Battle visuals.** Arenas and units are static placeholders; turns don't play attack animations yet.
-- **Balance.** Every number is a placeholder: costs, curves, regions 3–9 stats (×2.5 per region), rewards.
+- **Balance.** The rebirth curve is tuned against `pacing.luau`: 500k × 6^r up to rebirth 6, then × 2.5, with the cash cap at 1e24. Everything else is still a placeholder: regions 3–9 stats (×2.5 per region), gear, chest and battle rewards. Real player data should replace the sim's greedy player.
 
 ## Studio playtest checklist (highest risk first)
 
