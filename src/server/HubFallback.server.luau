@@ -35,7 +35,7 @@ local function promptOn(model, action, object)
 	return pp
 end
 local function placeAt(inst, pos)
-	local _, size = inst:GetBoundingBox()
+	local size = inst:IsA("Model") and select(2, inst:GetBoundingBox()) or inst.Size
 	inst:PivotTo(CFrame.new(pos + V(0, Kit.G + size.Y / 2, 0)))
 end
 

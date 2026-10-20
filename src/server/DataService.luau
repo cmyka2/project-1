@@ -9,6 +9,7 @@ local Schema = require(script.Parent.DataSchema)
 local Config = require(game:GetService("ReplicatedStorage").Monster.MonsterConfig)
 
 local STORE, AUTOSAVE, SAVE_SOON = "MonsterRoll_v1", 60, 5
+local TRIES = RunService:IsStudio() and 1 or 4 -- Studio without API access fails fast instead of waiting ~30 s
 local JOB = game.JobId ~= "" and game.JobId or "studio-" .. Http:GenerateGUID(false)
 local storeOk, store = pcall(DSS.GetDataStore, DSS, STORE) -- errors in unpublished places
 if not storeOk then warn("DataStore unavailable:", store) store = nil end
@@ -27,11 +28,11 @@ end
 
 -- one UpdateAsync with retries; transform(old) returns the value to write, or nil to cancel
 local function update(userId, transform)
-	for i = 1, 4 do
+	for i = 1, TRIES do
 		local ok, err = pcall(store.UpdateAsync, store, key(userId), transform)
 		if ok then return true end
 		warn(("DataStore UpdateAsync failed for %d (try %d): %s"):format(userId, i, tostring(err)))
-		task.wait(2 ^ i)
+		if i < TRIES then task.wait(2 ^ i) end
 	end
 	return false
 end
@@ -55,7 +56,8 @@ local function load(player: Player)
 			local ok = update(userId, function(old)
 				local now = os.time()
 				if old and (old.Version or 1) > Schema.VERSION then status = "newer" return nil end
-				if old and not Schema.canTake(old._lock, JOB, now) then status = "locked" return nil end
+				local studioLock = RunService:IsStudio() and old and old._lock and string.sub(tostring(old._lock.job), 1, 7) == "studio-"
+				if old and not studioLock and not Schema.canTake(old._lock, JOB, now) then status = "locked" return nil end -- a crashed Studio test never blocks the next one
 				local d = old and Schema.migrate(old, refund) or Schema.default()
 				d._lock = { job = JOB, t = now }
 				data, status = d, "ok"
