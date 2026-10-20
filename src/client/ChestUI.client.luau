@@ -1,0 +1,155 @@
+-- Chest Shop panel + GEAR bag (equip gear onto the monster in a base slot).
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local PPS = game:GetService("ProximityPromptService")
+local Http = game:GetService("HttpService")
+local Gear = require(RS:WaitForChild("Monster"):WaitForChild("GearConfig"))
+local Dice = require(RS.Monster:WaitForChild("DiceConfig"))
+local Config = require(RS.Monster:WaitForChild("MonsterConfig"))
+local ChestAction = RS.Monster:WaitForChild("ChestAction")
+local player = Players.LocalPlayer
+
+local function short(n)
+	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
+		if n >= u[1] then return (("%.1f"):format(n / u[1]):gsub("%.0$", "")) .. u[2] end
+	end
+	return tostring(math.floor(n))
+end
+local function text(class, parent, str, size, pos, color)
+	local l = Instance.new(class) l.Size = size l.Position = pos l.BackgroundTransparency = 1 l.Font = Enum.Font.FredokaOne l.TextScaled = true
+	l.Text = str l.TextColor3 = color or Color3.new(1, 1, 1) l.TextStrokeTransparency = 0 l.Parent = parent
+	return l
+end
+local function decode(attr)
+	local ok, v = pcall(Http.JSONDecode, Http, player:GetAttribute(attr) or "")
+	return ok and v or {}
+end
+local function pct(x) return math.floor(x * 100 + 0.5) .. "%" end
+local function panelFrame(gui, titleText, color)
+	local panel = Instance.new("Frame") panel.AnchorPoint = Vector2.new(0.5, 0.5) panel.Position = UDim2.fromScale(0.5, 0.5) panel.Size = UDim2.fromScale(0.8, 0.82)
+	panel.BackgroundColor3 = color panel.Visible = false panel.Parent = gui
+	local lim = Instance.new("UISizeConstraint") lim.MaxSize = Vector2.new(820, 640) lim.Parent = panel
+	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
+	local ps = Instance.new("UIStroke", panel) ps.Thickness = 4
+	text("TextLabel", panel, titleText, UDim2.fromScale(0.6, 0.09), UDim2.fromScale(0.03, 0.02)).TextXAlignment = Enum.TextXAlignment.Left
+	local msg = text("TextLabel", panel, "", UDim2.fromScale(0.94, 0.055), UDim2.fromScale(0.03, 0.115), Color3.fromRGB(255, 220, 120))
+	local close = text("TextButton", panel, "X", UDim2.fromOffset(40, 40), UDim2.new(1, -48, 0, 8))
+	close.BackgroundTransparency = 0 close.BackgroundColor3 = Color3.fromRGB(220, 50, 50) Instance.new("UICorner", close)
+	close.MouseButton1Click:Connect(function() panel.Visible = false end)
+	local list = Instance.new("ScrollingFrame") list.Position = UDim2.fromScale(0.03, 0.18) list.Size = UDim2.fromScale(0.94, 0.79)
+	list.BackgroundTransparency = 1 list.BorderSizePixel = 0 list.CanvasSize = UDim2.new() list.AutomaticCanvasSize = Enum.AutomaticSize.Y list.ScrollBarThickness = 8 list.Parent = panel
+	return panel, msg, list
+end
+local function btn(parent, size, pos, color)
+	local b = text("TextButton", parent, "", size, pos)
+	b.BackgroundTransparency = 0 b.BackgroundColor3 = color
+	Instance.new("UICorner", b)
+	local st = Instance.new("UIStroke", b) st.Thickness = 3 st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	return b
+end
+
+local gui = Instance.new("ScreenGui") gui.Name = "ChestUI" gui.ResetOnSpawn = false gui.Parent = player:WaitForChild("PlayerGui")
+
+-- CHEST SHOP
+local shop, shopMsg, shopList = panelFrame(gui, "CHEST SHOP", Color3.fromRGB(60, 40, 25))
+local sl = Instance.new("UIListLayout") sl.Padding = UDim.new(0, 8) sl.SortOrder = Enum.SortOrder.LayoutOrder sl.Parent = shopList
+local chestRows = {}
+for i, c in Gear.Chests do
+	local row = Instance.new("Frame") row.Size = UDim2.new(1, -12, 0, 78) row.BackgroundColor3 = Color3.fromRGB(85, 60, 40) row.LayoutOrder = i row.Parent = shopList
+	Instance.new("UICorner", row)
+	local icon = text("TextLabel", row, "🧰", UDim2.fromOffset(56, 56), UDim2.fromOffset(10, 11))
+	icon.BackgroundTransparency = 0 icon.BackgroundColor3 = c.color Instance.new("UICorner", icon) Instance.new("UIStroke", icon).Thickness = 3
+	text("TextLabel", row, c.name, UDim2.new(0.55, -80, 0, 30), UDim2.fromOffset(76, 6), c.color).TextXAlignment = Enum.TextXAlignment.Left
+	local parts = {}
+	local odds = Gear.odds(c)
+	for _, r in Gear.Rarities do if odds[r.id] then table.insert(parts, r.id .. " " .. pct(odds[r.id])) end end
+	local o = text("TextLabel", row, table.concat(parts, " • "), UDim2.new(0.62, -80, 0, 34), UDim2.fromOffset(76, 38), Color3.fromRGB(230, 220, 200))
+	o.TextXAlignment = Enum.TextXAlignment.Left o.TextWrapped = true
+	local b = btn(row, UDim2.new(0.3, 0, 0, 52), UDim2.new(0.68, 0, 0, 13), Color3.fromRGB(50, 180, 70))
+	chestRows[c.id] = { button = b, chest = c }
+	b.MouseButton1Click:Connect(function()
+		local ok, res = ChestAction:InvokeServer("open", c.id)
+		if ok then
+			local r = Gear.RarityById[res.r]
+			shopMsg.TextColor3 = r.color
+			shopMsg.Text = "You got: " .. Gear.TypeById[res.t].icon .. " " .. Gear.name(res) .. "  (+" .. pct(r.income) .. " income)"
+		else
+			shopMsg.TextColor3 = Color3.fromRGB(255, 140, 140)
+			shopMsg.Text = res
+		end
+	end)
+end
+local function refreshShop()
+	local owned, cash = decode("Dice"), player:GetAttribute("Cash") or 0
+	for _, row in chestRows do
+		local c, b = row.chest, row.button
+		if not owned[c.die] then
+			b.Text, b.BackgroundColor3 = "🔒 " .. Dice.ById[c.die].name, Color3.fromRGB(60, 60, 70)
+		else
+			b.Text = "Open $" .. short(c.cost)
+			b.BackgroundColor3 = cash >= c.cost and Color3.fromRGB(50, 180, 70) or Color3.fromRGB(150, 60, 60)
+		end
+	end
+end
+player:GetAttributeChangedSignal("Cash"):Connect(function() if shop.Visible then refreshShop() end end)
+player:GetAttributeChangedSignal("Dice"):Connect(refreshShop)
+
+-- GEAR BAG
+local bag, bagMsg, bagList = panelFrame(gui, "GEAR", Color3.fromRGB(30, 45, 60))
+bagList.Size = UDim2.fromScale(0.94, 0.6)
+local grid = Instance.new("UIGridLayout") grid.CellSize = UDim2.fromOffset(150, 84) grid.CellPadding = UDim2.fromOffset(8, 8)
+grid.SortOrder = Enum.SortOrder.LayoutOrder grid.HorizontalAlignment = Enum.HorizontalAlignment.Center grid.Parent = bagList
+local slotBar = Instance.new("Frame") slotBar.Position = UDim2.fromScale(0.03, 0.8) slotBar.Size = UDim2.fromScale(0.94, 0.17) slotBar.BackgroundTransparency = 1 slotBar.Parent = bag
+local sbl = Instance.new("UIListLayout") sbl.FillDirection = Enum.FillDirection.Horizontal sbl.Padding = UDim.new(0, 6) sbl.HorizontalAlignment = Enum.HorizontalAlignment.Center
+sbl.VerticalAlignment = Enum.VerticalAlignment.Center sbl.Parent = slotBar
+local selected
+
+local function refreshBag()
+	for _, c in bagList:GetChildren() do if c:IsA("GuiButton") then c:Destroy() end end
+	for _, c in slotBar:GetChildren() do if c:IsA("GuiButton") then c:Destroy() end end
+	local gear, placed = decode("Gear"), decode("Placed")
+	if selected and not gear[selected] then selected = nil end
+	local items = {}
+	for uid, g in gear do table.insert(items, { uid = uid, g = g }) end
+	table.sort(items, function(a, b) return Gear.RarityById[a.g.r].income > Gear.RarityById[b.g.r].income end)
+	bagMsg.TextColor3 = Color3.fromRGB(220, 220, 230)
+	bagMsg.Text = #items == 0 and "No gear yet. Open chests at the Chest Shop!" or (selected and "Pick a base slot to equip it on" or "Tap gear, then pick a base slot")
+	for i, it in items do
+		local r = Gear.RarityById[it.g.r]
+		local b = btn(bagList, UDim2.new(), UDim2.new(), Color3.fromRGB(45, 60, 80))
+		b.LayoutOrder = i
+		b:FindFirstChildOfClass("UIStroke").Color = it.uid == selected and Color3.new(1, 1, 1) or r.color
+		b:FindFirstChildOfClass("UIStroke").Thickness = it.uid == selected and 5 or 3
+		text("TextLabel", b, Gear.TypeById[it.g.t].icon .. " " .. Gear.name(it.g), UDim2.new(1, -8, 0.4, 0), UDim2.fromOffset(4, 4), r.color)
+		text("TextLabel", b, "+" .. pct(r.income) .. " income", UDim2.new(1, -8, 0.26, 0), UDim2.new(0, 4, 0.44, 0), Color3.fromRGB(120, 255, 120))
+		text("TextLabel", b, it.g.slot and ("On slot " .. it.g.slot) or "In bag", UDim2.new(1, -8, 0.22, 0), UDim2.new(0, 4, 0.72, 0), Color3.fromRGB(190, 190, 200))
+		b.MouseButton1Click:Connect(function() selected = it.uid refreshBag() end)
+	end
+	if not selected then return end
+	local keys = {}
+	for sk in placed do table.insert(keys, tonumber(sk)) end
+	table.sort(keys)
+	for _, n in keys do
+		local id = string.match(placed[tostring(n)], "^(.-)|")
+		local def = Config.ById[id]
+		local b = btn(slotBar, UDim2.fromOffset(92, 60), UDim2.new(), Color3.fromRGB(40, 130, 230))
+		b.Text = "Slot " .. n .. "\n" .. (def and def.name or "?")
+		b.MouseButton1Click:Connect(function()
+			local ok, err = ChestAction:InvokeServer("equip", selected, n)
+			if not ok then bagMsg.TextColor3 = Color3.fromRGB(255, 140, 140) bagMsg.Text = err end
+		end)
+	end
+	if #keys == 0 then bagMsg.Text = "Place a monster on your base first" end
+	local un = btn(slotBar, UDim2.fromOffset(92, 60), UDim2.new(), Color3.fromRGB(150, 60, 60))
+	un.Text = "Unequip"
+	un.MouseButton1Click:Connect(function() ChestAction:InvokeServer("unequip", selected) end)
+end
+player:GetAttributeChangedSignal("Gear"):Connect(function() if bag.Visible then refreshBag() end end)
+player:GetAttributeChangedSignal("Placed"):Connect(function() if bag.Visible then refreshBag() end end)
+
+local hud = btn(gui, UDim2.fromOffset(120, 50), UDim2.new(0, 12, 0.5, 70), Color3.fromRGB(40, 110, 170))
+hud.Text = "GEAR"
+hud.MouseButton1Click:Connect(function() selected = nil refreshBag() bag.Visible = not bag.Visible end)
+PPS.PromptTriggered:Connect(function(prompt)
+	if prompt:FindFirstAncestor("ChestShop") then shopMsg.Text = "" refreshShop() shop.Visible = true end
+end)
