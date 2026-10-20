@@ -1,10 +1,14 @@
 -- Pure turn-based battle rules (no Roblox state): the server owns a state and feeds it actions.
--- Damage: atk * actionMult * 100/(100+def) * element * crit(10%, x1.5) * (0.5 if defending), min 1.
--- ponytail: Defend is the only status; add burn/freeze/etc. as data on units when regions need them.
+-- Damage, in this order: atk x actionMult x (0.75 if Weakened) x 100/(100 + def x (0.5 if Exposed)) x element
+-- x crit(10%, x1.5) x (0.5 if defending), floored, min 1; then a Shield absorbs what it can.
+-- Defense only divides, so it can never reduce damage to zero.
 local B = require(game:GetService("ReplicatedStorage").Monster.BattleConfig)
 local E = {}
 E.ACTIONS = { attack = true, skill = true, defend = true, ultimate = true }
 local SKILL_CD, ULT_COST, CRIT = 2, 100, 0.1
+local ORDER = {} -- statuses tick in a fixed (alphabetical) order
+for name in B.Status do table.insert(ORDER, name) end
+table.sort(ORDER)
 
 function E.elementMult(a, d)
 	if B.Strong[a] and B.Strong[a][d] then return B.STRONG_MULT end
@@ -21,11 +25,6 @@ local function alive(s, side)
 	for i, u in s.units do if u.alive and u.side == side then table.insert(out, i) end end
 	return out
 end
-local function startTurn(s)
-	local u = s.units[s.order[s.turn]]
-	u.defending = false
-	u.cd = math.max(0, u.cd - 1)
-end
 local function newRound(s)
 	s.round += 1
 	s.order = {}
@@ -36,43 +35,104 @@ local function newRound(s)
 		if ua.side ~= ub.side then return ua.side == "player" end
 		return a < b
 	end)
-	s.turn = 1
-	startTurn(s)
+	s.turn = 0
 end
 local function checkEnd(s)
 	if #alive(s, "enemy") == 0 then s.over, s.winner = true, "player"
 	elseif #alive(s, "player") == 0 then s.over, s.winner = true, "enemy" end
 end
+
+-- start-of-turn effects in a fixed order; true if the unit loses this turn
+local function tick(s, u)
+	u.defending = false
+	u.cd = math.max(0, u.cd - 1)
+	u.ccImmune = math.max(0, u.ccImmune - 1)
+	local skip = false
+	for _, name in ORDER do
+		local st, left = B.Status[name], u.status[name]
+		if left then
+			if st.dot then
+				local d = math.max(1, math.floor(u.maxHp * st.dot))
+				u.hp = math.max(0, u.hp - d)
+				log(s, u.name .. " takes " .. d .. " from " .. st.name)
+			elseif st.hot then
+				local h = math.min(u.maxHp - u.hp, math.floor(u.maxHp * st.hot))
+				u.hp += h
+				if h > 0 then log(s, u.name .. " regenerates " .. h) end
+			end
+			if st.skip then skip = true end
+			if left <= 1 then
+				u.status[name] = nil
+				if name == "shield" then u.shield = 0 end
+				if st.skip then u.ccImmune = u.boss and B.BOSS_CONTROL_IMMUNE or B.CONTROL_IMMUNE end
+			else
+				u.status[name] = left - 1
+			end
+		end
+	end
+	if u.hp == 0 then u.alive = false log(s, u.name .. " is knocked out") end
+	return skip or not u.alive
+end
+-- moves to the next unit that can act, running start-of-turn effects (and rounds) on the way
 local function advance(s)
-	repeat
+	for _ = 1, 1000 do
 		s.turn += 1
-		if s.turn > #s.order then newRound(s) return end
-	until s.units[s.order[s.turn]].alive
-	startTurn(s)
+		if s.turn > #s.order then newRound(s) s.turn = 1 end
+		local u = s.units[s.order[s.turn]]
+		if u.alive then
+			local lost = tick(s, u)
+			checkEnd(s)
+			if s.over or not lost then return end
+			if u.alive then log(s, u.name .. " can't move!") end
+		end
+	end
 end
 
 local function unit(side, st)
 	return { side = side, name = st.name, element = st.element, hp = st.hp, maxHp = st.hp, dmg = st.dmg, def = st.def, spd = st.spd,
-		skill = B.SkillName[st.element] or "Skill", energy = 0, cd = 0, defending = false, alive = true }
+		skill = B.SkillName[st.element] or "Skill", status = {}, shield = 0, ccImmune = 0, boss = st.boss == true,
+		energy = 0, cd = 0, defending = false, alive = true, iid = st.iid }
 end
 function E.new(team, enemies, rng: Random)
 	local s = { units = {}, round = 0, log = {}, over = false, rng = rng }
 	for _, st in team do table.insert(s.units, unit("player", st)) end
 	for _, st in enemies do table.insert(s.units, unit("enemy", st)) end
 	newRound(s)
+	checkEnd(s)
+	if not s.over then advance(s) end
 	return s
 end
 function E.current(s) return s.units[s.order[s.turn]], s.order[s.turn] end
 
 function E.hit(s, a, t, mult)
-	local dmg = a.dmg * mult * 100 / (100 + t.def) * E.elementMult(a.element, t.element)
+	local dealt = a.status.weaken and B.Status.weaken.dealt or 1
+	local def = t.def * (t.status.expose and B.Status.expose.armor or 1)
+	local dmg = a.dmg * mult * dealt * 100 / (100 + def) * E.elementMult(a.element, t.element)
 	local crit = s.rng:NextNumber() < CRIT
 	if crit then dmg *= 1.5 end
 	if t.defending then dmg *= 0.5 end
 	dmg = math.max(1, math.floor(dmg))
-	t.hp = math.max(0, t.hp - dmg)
+	local absorbed = math.min(t.shield, dmg)
+	t.shield -= absorbed
+	t.hp = math.max(0, t.hp - (dmg - absorbed))
 	if t.hp == 0 then t.alive = false end
 	return dmg, crit
+end
+
+-- the element status a skill applies; returns a log suffix
+local function applyStatus(a, t)
+	local name = B.SkillStatus[a.element]
+	local st = name and B.Status[name]
+	if not st then return "" end
+	local who = st.self and a or t
+	if not who.alive then return "" end
+	if st.skip and (who.ccImmune > 0 or who.status.freeze or who.status.stun) then return " (" .. who.name .. " resists " .. st.name .. ")" end
+	who.status[name] = st.dur
+	if st.absorb then who.shield = math.floor(who.maxHp * st.absorb) end
+	if st.cleanse then
+		for n in who.status do if not B.Status[n].self then who.status[n] = nil end end
+	end
+	return " +" .. st.name .. (st.self and "" or " on " .. who.name)
 end
 
 -- acts for the current unit; returns ok, err
@@ -94,7 +154,7 @@ function E.act(s, action, target)
 	elseif action == "skill" then
 		local d, c = E.hit(s, a, t, 1.6)
 		a.cd, a.energy = SKILL_CD + 1, math.min(ULT_COST, a.energy + 15) -- +1: ticks down at the start of its own next turn
-		log(s, a.name .. " uses " .. a.skill .. " on " .. t.name .. " for " .. d .. (c and " (CRIT!)" or ""))
+		log(s, a.name .. " uses " .. a.skill .. " on " .. t.name .. " for " .. d .. (c and " (CRIT!)" or "") .. applyStatus(a, t))
 	elseif action == "defend" then
 		a.defending, a.energy = true, math.min(ULT_COST, a.energy + 20)
 		log(s, a.name .. " defends")
@@ -109,12 +169,21 @@ function E.act(s, action, target)
 	return true
 end
 
--- simple enemy brain: ult when full, defend when low (sometimes), skill when ready, hit the weakest player monster
+-- enemy brain: ult when full; self-buff skills when hurt; defend when low (sometimes);
+-- otherwise skill/attack the foe it hits hardest (element), breaking ties on lowest HP
 function E.ai(s)
 	local a = E.current(s)
 	local foes = alive(s, a.side == "enemy" and "player" or "enemy")
-	table.sort(foes, function(x, y) return s.units[x].hp < s.units[y].hp end)
+	table.sort(foes, function(x, y)
+		local ux, uy = s.units[x], s.units[y]
+		local ex, ey = E.elementMult(a.element, ux.element), E.elementMult(a.element, uy.element)
+		if ex ~= ey then return ex > ey end
+		if ux.hp ~= uy.hp then return ux.hp < uy.hp end
+		return x < y
+	end)
 	if a.energy >= ULT_COST then return "ultimate" end
+	local st = B.Status[B.SkillStatus[a.element] or ""]
+	if a.cd == 0 and st and st.self and a.hp < a.maxHp * 0.5 then return "skill", foes[1] end
 	if a.hp < a.maxHp * 0.3 and s.rng:NextNumber() < 0.35 then return "defend" end
 	return a.cd == 0 and "skill" or "attack", foes[1]
 end
@@ -125,8 +194,8 @@ end
 function E.snapshot(s)
 	local units = {}
 	for _, u in s.units do
-		table.insert(units, { name = u.name, side = u.side, element = u.element, hp = u.hp, maxHp = u.maxHp, energy = u.energy,
-			cd = u.cd, skill = u.skill, defending = u.defending, alive = u.alive })
+		units[#units + 1] = { name = u.name, side = u.side, element = u.element, hp = u.hp, maxHp = u.maxHp, energy = u.energy,
+			cd = u.cd, skill = u.skill, defending = u.defending, alive = u.alive, status = table.clone(u.status), shield = u.shield, boss = u.boss }
 	end
 	local _, idx = E.current(s)
 	local order = {}

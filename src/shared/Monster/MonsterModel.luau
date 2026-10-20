@@ -1,6 +1,7 @@
--- Builds a monster model. Real art: drop a Model named <monster id> into ReplicatedStorage.Assets.Monsters.
-local RS = game:GetService("ReplicatedStorage")
+-- Builds a monster model. Real art: drop a Model named <monster id> into ReplicatedStorage.Assets.Monsters
+-- (resolved through AssetRegistry); anything missing or partless gets the generated placeholder below.
 local Config = require(script.Parent.MonsterConfig)
+local Assets = require(script.Parent.AssetRegistry)
 
 local ELEMENT = {
 	Nature = Color3.fromRGB(80, 180, 70), Earth = Color3.fromRGB(150, 110, 70), Water = Color3.fromRGB(70, 150, 240),
@@ -57,18 +58,14 @@ end
 
 local Model = {}
 function Model.build(def, variant: string?)
-	local folder = RS:FindFirstChild("Assets") and RS.Assets:FindFirstChild("Monsters")
-	local asset = folder and folder:FindFirstChild(def.id)
+	local asset = Assets.GetAsset("Monsters", def.id)
 	local m
-	if asset and asset:IsA("Model") then
+	if asset and asset:IsA("Model") and Assets.usable(asset) then
 		m = asset:Clone()
 		m.PrimaryPart = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart", true)
-		if m.PrimaryPart then
-			for _, d in m:GetDescendants() do if d:IsA("BasePart") then d.Anchored = true d.CanCollide = false end end
-		else
-			warn("Monster asset has no parts, using placeholder:", def.id)
-			m = nil
-		end
+		for _, d in m:GetDescendants() do if d:IsA("BasePart") then d.Anchored = true d.CanCollide = false end end
+	elseif asset then
+		warn("Monster asset has no parts, using placeholder:", def.id)
 	end
 	m = m or placeholder(def)
 	local v = Config.VariantById[variant or "Normal"]

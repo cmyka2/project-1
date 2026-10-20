@@ -1,4 +1,6 @@
 -- All monsters, rarities and variants. Add a monster = add one row; RNG, Index and models pick it up.
+local Weighted = require(script.Parent.Weighted)
+local Luck = require(script.Parent.LuckConfig)
 local Config = {}
 
 local C = Color3.fromRGB
@@ -30,7 +32,8 @@ Config.Income = {
 }
 Config.VariantIncome = { Normal = 1, Huge = 10, Monstrous = 50 }
 
-local function m(id, name, rarity, element, shape) return { id = id, name = name, rarity = rarity, element = element, shape = shape } end
+-- dice = optional list of die ids that can roll it (world-exclusive monsters)
+local function m(id, name, rarity, element, shape, dice) return { id = id, name = name, rarity = rarity, element = element, shape = shape, dice = dice } end
 Config.Monsters = {
 	m("moss_goblin", "Moss Goblin", "Common", "Nature", "biped"),
 	m("meadow_slime", "Meadow Slime", "Common", "Nature", "blob"),
@@ -65,9 +68,9 @@ Config.Monsters = {
 	m("the_watcher", "The Watcher", "Secret", "Shadow", "blob"),
 	m("mimic_king", "Mimic King", "Secret", "Shadow", "biped"),
 	m("hollow_echo", "Hollow Echo", "Secret", "Cosmic", "beast"),
-	m("null_0", "NULL-0", "Glitched", "Cosmic", "biped"),
-	m("err0r_beast", "ERR0R Beast", "Glitched", "Cosmic", "beast"),
-	m("missing_texture", "Missing Texture", "Glitched", "Cosmic", "blob"),
+	m("null_0", "NULL-0", "Glitched", "Cosmic", "biped", { "glitch" }),
+	m("err0r_beast", "ERR0R Beast", "Glitched", "Cosmic", "beast", { "glitch" }),
+	m("missing_texture", "Missing Texture", "Glitched", "Cosmic", "blob", { "glitch" }),
 }
 
 Config.ById, Config.RarityById, Config.VariantById, Config.Tier, Config.Pools, Config.Odds = {}, {}, {}, {}, {}, {}
@@ -79,43 +82,46 @@ for _, d in Config.Monsters do
 	Config.Pools[d.rarity] = Config.Pools[d.rarity] or {}
 	table.insert(Config.Pools[d.rarity], d)
 end
-local total = 0
-for _, r in Config.Rarities do if Config.Pools[r.id] then total += 1 / r.oneIn end end
-for _, r in Config.Rarities do Config.Odds[r.id] = Config.Pools[r.id] and (1 / r.oneIn) / total or 0 end
 
--- luck >= 1 boosts Rare and above; tiers above maxTier are excluded; weights renormalize to sum 1
-local function weights(luck: number?, maxTier: number?)
-	luck = math.max(1, luck or 1)
-	maxTier = math.max(1, maxTier or #Config.Rarities)
-	local w, sum = {}, 0
-	for _, rar in Config.Rarities do
-		if Config.Pools[rar.id] and Config.Tier[rar.id] <= maxTier then
-			w[rar.id] = (1 / rar.oneIn) * (Config.Tier[rar.id] >= 3 and luck or 1)
-			sum += w[rar.id]
-		end
-	end
-	return w, sum
+local function eligible(def, maxTier: number, dieId: string?)
+	if Config.Tier[def.rarity] > maxTier then return false end
+	if def.dice and not table.find(def.dice, dieId) then return false end -- die-exclusive monsters
+	return true
 end
 
-function Config.oddsFor(luck: number?, maxTier: number?)
-	local w, sum = weights(luck, maxTier)
+-- the roll pool: { { def, weight } } in roster order. Each rarity's weight (1/oneIn, reshaped by luck) is
+-- split evenly across its eligible monsters, so a rarity's odds don't depend on how many monsters it has.
+-- Ineligible monsters (above the die's tier cap, or exclusive to another die) never enter the pool.
+function Config.pool(luck: number?, maxTier: number?, dieId: string?)
+	luck = math.max(1, luck or 1)
+	maxTier = math.max(1, maxTier or #Config.Rarities)
+	local count = {}
+	for _, def in Config.Monsters do
+		if eligible(def, maxTier, dieId) then count[def.rarity] = (count[def.rarity] or 0) + 1 end
+	end
 	local out = {}
-	for id, x in w do out[id] = x / sum end
+	for _, def in Config.Monsters do
+		if eligible(def, maxTier, dieId) then
+			local rar, tier = Config.RarityById[def.rarity], Config.Tier[def.rarity]
+			table.insert(out, { def, (1 / rar.oneIn) * Luck.tierMult(luck, tier) / count[def.rarity] })
+		end
+	end
 	return out
 end
 
--- server-only in practice; rng is injectable so tests can seed it
-function Config.roll(rng: Random, luck: number?, maxTier: number?)
-	local w, sum = weights(luck, maxTier)
-	local r, pool = rng:NextNumber() * sum, nil
-	for _, rar in Config.Rarities do
-		if w[rar.id] then
-			pool = Config.Pools[rar.id]
-			r -= w[rar.id]
-			if r <= 0 then break end
-		end
-	end
-	local def = pool[rng:NextInteger(1, #pool)]
+-- real odds per rarity for this luck/die, summing to 1 (what the UI shows)
+function Config.oddsFor(luck: number?, maxTier: number?, dieId: string?)
+	local pool = Config.pool(luck, maxTier, dieId)
+	local p, out = Weighted.odds(pool), {}
+	for i, e in pool do out[e[1].rarity] = (out[e[1].rarity] or 0) + p[i] end
+	return out
+end
+Config.Odds = Config.oddsFor(1)
+
+-- server-only in practice; rng is injectable so tests can seed it. nil when the pool is empty.
+function Config.roll(rng: Random, luck: number?, maxTier: number?, dieId: string?)
+	local def = Weighted.pick(Config.pool(luck, maxTier, dieId), rng)
+	if not def then return nil end
 	local v, acc, variant = rng:NextNumber(), 0, "Normal"
 	for k = #Config.Variants, 2, -1 do
 		acc += 1 / Config.Variants[k].oneIn

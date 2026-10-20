@@ -1,5 +1,6 @@
--- Chests and the gear they drop. Each placed monster holds one weapon, one armor and one accessory.
--- income: bonus to the income of the monster wearing it. Combat stats arrive with battles.
+-- Chests, the gear they drop, crafting materials and recipes. Each monster holds one weapon, one armor and one accessory.
+-- income: bonus to the wearer's income; the same value boosts combat: weapon -> damage, armor -> HP, accessory -> speed.
+local Weighted = require(script.Parent.Weighted)
 local C = Color3.fromRGB
 local Gear = {}
 
@@ -35,24 +36,38 @@ for _, t in Gear.Types do Gear.TypeById[t.id] = t end
 for _, r in Gear.Rarities do Gear.RarityById[r.id] = r end
 for _, c in Gear.Chests do Gear.ChestById[c.id] = c end
 
+-- regional materials (battle drops) and data-driven recipes: pay cash + materials, get gear of that rarity (random type)
+Gear.Materials = {
+	{ id = "forest_essence", name = "Forest Essence", icon = "🌿" },
+	{ id = "desert_relic", name = "Desert Relic", icon = "🏺" },
+	{ id = "mountain_shard", name = "Mountain Shard", icon = "🪨" },
+	{ id = "ember_shard", name = "Ember Shard", icon = "🔥" },
+	{ id = "crystal_fragment", name = "Crystal Fragment", icon = "💎" },
+	{ id = "divine_dust", name = "Divine Dust", icon = "✨" },
+	{ id = "cosmic_core", name = "Cosmic Core", icon = "🌌" },
+}
+Gear.Recipes = {
+	{ id = "rare_gear", name = "Forge Rare Gear", rarity = "Rare", cash = 10000, mats = { forest_essence = 5 } },
+	{ id = "epic_gear", name = "Forge Epic Gear", rarity = "Epic", cash = 250000, mats = { forest_essence = 15, desert_relic = 5 } },
+}
+Gear.MaterialById, Gear.RecipeById = {}, {}
+for _, m in Gear.Materials do Gear.MaterialById[m.id] = m end
+for _, r in Gear.Recipes do Gear.RecipeById[r.id] = r end
+
+local function entries(c)
+	local out = {}
+	for _, rar in Gear.Rarities do if c.weights[rar.id] then table.insert(out, { rar.id, c.weights[rar.id] }) end end
+	return out
+end
 -- real drop odds for a chest, summing to 1
 function Gear.odds(c)
-	local sum, out = 0, {}
-	for _, w in c.weights do sum += w end
-	for id, w in c.weights do out[id] = w / sum end
+	local list, out = entries(c), {}
+	local p = Weighted.odds(list) or {}
+	for i, e in list do if p[i] > 0 then out[e[1]] = p[i] end end
 	return out
 end
 function Gear.roll(c, rng: Random)
-	local r, rarity = rng:NextNumber(), nil
-	local odds = Gear.odds(c)
-	for _, rar in Gear.Rarities do
-		if odds[rar.id] then
-			rarity = rar.id
-			r -= odds[rar.id]
-			if r <= 0 then break end
-		end
-	end
-	return rarity, Gear.Types[rng:NextInteger(1, #Gear.Types)].id
+	return Weighted.pick(entries(c), rng), Gear.Types[rng:NextInteger(1, #Gear.Types)].id
 end
 function Gear.name(g)
 	return g.r .. " " .. Gear.TypeById[g.t].name

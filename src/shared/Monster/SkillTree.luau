@@ -1,5 +1,5 @@
 -- Hex upgrade tree. q/r = flat-top axial hex coords (Start at 0,0).
--- effect: income/luck/rollspeed/walkspeed are live; the rest are recorded but not active until their systems exist.
+-- effect: summed per effect by Tree.stat, the single place skill bonuses are read from (each applies once).
 local Tree = {}
 local function n(id, name, icon, q, r, cost, requires, effect, value)
 	return { id = id, name = name, icon = icon, q = q, r = r, cost = cost, requires = requires, effect = effect, value = value }
@@ -32,14 +32,14 @@ Tree.Nodes = {
 Tree.ById = {}
 for _, node in Tree.Nodes do Tree.ById[node.id] = node end
 
-Tree.Live = { income = true, luck = true, rollspeed = true, walkspeed = true, damage = true, health = true }
+Tree.Live = { income = true, luck = true, rollspeed = true, walkspeed = true, damage = true, health = true, storage = true, sell = true }
 function Tree.describe(node)
 	if not node.effect then return "The root of your tree." end
 	local v = node.value
 	local d = ({
 		income = "+" .. v * 100 .. "% income", luck = "+" .. v * 100 .. "% luck", rollspeed = "-" .. v * 100 .. "% roll cooldown",
 		walkspeed = "+" .. v .. " walk speed", sell = "+" .. v * 100 .. "% sell value", damage = "+" .. v * 100 .. "% damage",
-		health = "+" .. v * 100 .. "% health", storage = "+" .. v .. " unit storage",
+		health = "+" .. v * 100 .. "% health", storage = "+" .. v .. " backpack space",
 	})[node.effect]
 	return Tree.Live[node.effect] and d or d .. " (not active yet)"
 end
