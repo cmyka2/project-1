@@ -7,6 +7,7 @@ local Config = require(RS:WaitForChild("Monster"):WaitForChild("MonsterConfig"))
 local Dice = require(RS.Monster:WaitForChild("DiceConfig"))
 local DiceAction = RS.Monster:WaitForChild("DiceAction")
 local player = Players.LocalPlayer
+local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 
 local function short(n)
 	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
@@ -20,7 +21,7 @@ local function text(class, parent, str, size, pos, color)
 	return l
 end
 local function decode(attr)
-	local ok, v = pcall(Http.JSONDecode, Http, player:GetAttribute(attr) or "")
+	local ok, v = pcall(Http.JSONDecode, Http, state:GetAttribute(attr) or "")
 	return ok and v or {}
 end
 
@@ -70,9 +71,9 @@ for i, die in Dice.List do
 end
 
 local function refresh()
-	local owned, sel, cash = decode("Dice"), player:GetAttribute("SelectedDie"), player:GetAttribute("Cash") or 0
+	local owned, sel, cash = decode("Dice"), state:GetAttribute("SelectedDie"), state:GetAttribute("Cash") or 0
 	local cur = Dice.ById[sel or "grassland"] or Dice.List[1]
-	hud.Text = "🎲 " .. cur.name .. "  •  Luck x" .. ("%.2f"):format(player:GetAttribute("Luck") or 1):gsub("%.?0+$", "")
+	hud.Text = "🎲 " .. cur.name .. "  •  Luck x" .. ("%.2f"):format(state:GetAttribute("Luck") or 1):gsub("%.?0+$", "")
 	for i, r in rows do
 		local die, b = r.die, r.button
 		local prev = Dice.List[Dice.Index[die.id] - 1]
@@ -88,8 +89,8 @@ local function refresh()
 		end
 	end
 end
-for _, a in { "Dice", "SelectedDie", "Luck" } do player:GetAttributeChangedSignal(a):Connect(refresh) end
-player:GetAttributeChangedSignal("Cash"):Connect(function() if panel.Visible then refresh() end end)
+for _, a in { "Dice", "SelectedDie", "Luck" } do state:GetAttributeChangedSignal(a):Connect(refresh) end
+state:GetAttributeChangedSignal("Cash"):Connect(function() if panel.Visible then refresh() end end)
 PPS.PromptTriggered:Connect(function(prompt)
 	if prompt:FindFirstAncestor("DiceShop") then msg.Text = "" refresh() panel.Visible = true end
 end)

@@ -3,9 +3,11 @@ local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local PPS = game:GetService("ProximityPromptService")
 local Rebirth = require(RS:WaitForChild("Monster"):WaitForChild("RebirthConfig"))
+local F = require(RS.Monster:WaitForChild("Formulas"))
+local B = require(RS.Monster:WaitForChild("BattleConfig"))
 local RebirthRF = RS.Monster:WaitForChild("Rebirth")
 local player = Players.LocalPlayer
-local MAX_SLOTS = 10
+local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 
 local function short(n)
 	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
@@ -31,8 +33,9 @@ local count = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.08), UDim2.fro
 local slots = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.08), UDim2.fromScale(0.05, 0.27), Color3.fromRGB(120, 230, 255))
 text("TextLabel", panel, "Resets: " .. table.concat(Rebirth.Resets, ", "), UDim2.fromScale(0.9, 0.07), UDim2.fromScale(0.05, 0.38), Color3.fromRGB(255, 120, 120))
 text("TextLabel", panel, "Keeps: " .. table.concat(Rebirth.Keeps, ", "), UDim2.fromScale(0.9, 0.07), UDim2.fromScale(0.05, 0.46), Color3.fromRGB(120, 255, 120))
-local costL = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.09), UDim2.fromScale(0.05, 0.56), Color3.fromRGB(255, 220, 90))
-local msg = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.06), UDim2.fromScale(0.05, 0.66), Color3.fromRGB(255, 140, 140))
+local perks = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.06), UDim2.fromScale(0.05, 0.54), Color3.fromRGB(230, 200, 255))
+local costL = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.08), UDim2.fromScale(0.05, 0.61), Color3.fromRGB(255, 220, 90))
+local msg = text("TextLabel", panel, "", UDim2.fromScale(0.9, 0.06), UDim2.fromScale(0.05, 0.70), Color3.fromRGB(255, 140, 140))
 
 local function button(str, color, pos)
 	local b = text("TextButton", panel, str, UDim2.fromScale(0.4, 0.15), pos)
@@ -45,23 +48,32 @@ local confirm = button("Rebirth", Color3.fromRGB(170, 70, 255), UDim2.fromScale(
 local cancel = button("Cancel", Color3.fromRGB(220, 50, 50), UDim2.fromScale(0.53, 0.78))
 
 local function refresh()
-	local n = player:GetAttribute("Rebirths") or 0
-	local cost, cash = Rebirth.cost(n), player:GetAttribute("Cash") or 0
+	local n = state:GetAttribute("Rebirths") or 0
+	local req, cash = Rebirth.requirement(n), state:GetAttribute("Cash") or 0
+	local cleared = true
+	if req.stage then
+		local ok, prog = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), state:GetAttribute("BattleProgress") or "")
+		cleared = ok and prog[req.stage] == true
+	end
 	count.Text = "Rebirths: " .. n .. "  →  " .. n + 1
-	local now, nextS = math.min(MAX_SLOTS, 5 + n), math.min(MAX_SLOTS, 6 + n)
-	slots.Text = "Base slots: " .. now .. "  →  " .. nextS .. (nextS == now and " (max)" or "")
-	costL.Text = "Cost: $" .. short(cost) .. "   (you have $" .. short(cash) .. ")"
-	confirm.AutoButtonColor = cash >= cost
-	confirm.BackgroundColor3 = cash >= cost and Color3.fromRGB(170, 70, 255) or Color3.fromRGB(90, 80, 100)
+	local nowS, nextS, nowF, nextF = F.slots(n), F.slots(n + 1), F.floors(n), F.floors(n + 1)
+	slots.Text = "Slots " .. nowS .. " → " .. nextS .. (nextS == nowS and " (max)" or "") .. "   •   Floors " .. nowF .. " → " .. nextF .. (nextF > nowF and " NEW FLOOR!" or "")
+	perks.Text = ("Permanent: +%d%% income, +%d%% luck, +%d Ascension Points"):format(Rebirth.INCOME_BONUS * 100, Rebirth.LUCK_BONUS * 100, Rebirth.points(n + 1))
+	costL.Text = "Cost: $" .. short(req.cost) .. "   (you have $" .. short(cash) .. ")"
+		.. (req.stage and ("\n" .. (cleared and "✅ " or "❌ ") .. "Defeat " .. B.StageById[req.stage].name:gsub("^BOSS: ", "")) or "")
+	local can = cash >= req.cost and cleared
+	confirm.AutoButtonColor = can
+	confirm.BackgroundColor3 = can and Color3.fromRGB(170, 70, 255) or Color3.fromRGB(90, 80, 100)
 end
-player:GetAttributeChangedSignal("Cash"):Connect(function() if panel.Visible then refresh() end end)
-player:GetAttributeChangedSignal("Rebirths"):Connect(refresh)
+state:GetAttributeChangedSignal("Cash"):Connect(function() if panel.Visible then refresh() end end)
+state:GetAttributeChangedSignal("Rebirths"):Connect(refresh)
 
 confirm.MouseButton1Click:Connect(function()
 	local ok, err = RebirthRF:InvokeServer()
+	local n = state:GetAttribute("Rebirths") or 0
 	if ok then
 		msg.TextColor3 = Color3.fromRGB(140, 255, 140)
-		msg.Text = "Reborn! A new slot is unlocked on your base."
+		msg.Text = "Reborn! " .. (F.floors(n) > F.floors(n - 1) and "A new floor is open on your base!" or "A new slot is unlocked on your base.")
 	else
 		msg.TextColor3 = Color3.fromRGB(255, 140, 140)
 		msg.Text = err

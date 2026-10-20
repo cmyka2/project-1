@@ -1,172 +1,201 @@
--- Server-authoritative: rolling, cash/income, skill tree purchases, saving.
-local DSS = game:GetService("DataStoreService")
+-- Server-authoritative core loop: rolling, base placement + floors, income and offline earnings, monster upgrades,
+-- inventory actions (lock/favorite/sell/fuse), skill tree, dice shop, rebirth.
+-- Persistence lives in DataService, shared state/economy in Game, chests/gear in ChestService, battles in BattleService.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local Http = game:GetService("HttpService")
-local Config = require(RS.Monster.MonsterConfig)
-local Tree = require(RS.Monster.SkillTree)
-local RebirthConfig = require(RS.Monster.RebirthConfig)
-local DiceConfig = require(RS.Monster.DiceConfig)
-local GearConfig = require(RS.Monster.GearConfig)
-local MAX_GEAR = 200
-local MonsterModel = require(RS.Monster.MonsterModel)
+local M = RS.Monster
+local Config = require(M.MonsterConfig)
+local Tree = require(M.SkillTree)
+local RebirthConfig = require(M.RebirthConfig)
+local DiceConfig = require(M.DiceConfig)
+local MonsterModel = require(M.MonsterModel)
+local Assets = require(M.AssetRegistry)
+local F = require(M.Formulas)
+local Data = require(script.Parent.DataService)
+local Game = require(script.Parent.Game)
+local Guard = require(script.Parent.Guard)
 
-local storeOk, store = pcall(DSS.GetDataStore, DSS, "MonsterRoll_v1") -- errors in unpublished places
-if not storeOk then warn("DataStore unavailable:", store) store = nil end
-local profiles = {} -- [Player] = { data = table, saveable = bool }
-local lastAction = {}
 local rng = Random.new()
 local ROLL_COOLDOWN = 0.8
-local BASE_SLOTS, MAX_SLOTS = 5, 10 -- 5 + rebirths, capped by the 10 pedestals on a plot
--- ponytail: one floor; add floors 2-3 (rebirth 6/12) when plots get upper levels
-local renderAll -- defined with placement below
-local MAX_CASH = 1e15 -- ponytail: plain numbers; switch to a big-number format before costs pass ~1e15
+local FLOOR_H = 24 -- studs between generated floors
+local short = Game.short
 
-local function key(player) return "u_" .. player.UserId end
-local function default() return { Version = 1, Discovered = {}, Owned = {}, Rolls = 0, Cash = 0, Skills = { start = true }, Placed = {}, Rebirths = 0, Dice = { grassland = true }, SelectedDie = "grassland", Gear = {}, NextGearId = 1, BattleProgress = {} } end
-local function migrate(d)
-	d.Cash = d.Cash or 0
-	d.Skills = d.Skills or { start = true }
-	d.Placed = d.Placed or {}
-	d.Rebirths = d.Rebirths or 0
-	d.Dice = d.Dice or { grassland = true }
-	d.SelectedDie = d.SelectedDie or "grassland"
-	d.Gear = d.Gear or {}
-	d.NextGearId = d.NextGearId or 1
-	d.BattleProgress = d.BattleProgress or {}
-	return d
-end
-
-local function stat(p, effect) return Tree.stat(p.data.Skills, effect) end
-local function dieOf(p) return DiceConfig.ById[p.data.SelectedDie] or DiceConfig.List[1] end
-local function effLuck(p) return (1 + stat(p, "luck")) * dieOf(p).luck end
-
--- k = "monsterId|Variant"
-local function keyIncome(p, k)
-	local id, variant = string.match(k, "^(.-)|(.+)$")
-	local def = Config.ById[id]
-	if not def then return 0 end
-	return Config.Income[def.rarity] * (Config.VariantIncome[variant] or 1) * (1 + stat(p, "income"))
-end
-
--- gear is equipped to a base slot (sk = "1".."10") and boosts that slot's monster
--- ponytail: gear follows the slot, not a monster instance; move to instance ids when monsters get levels/fusion
-local function gearBonus(p, sk)
-	local b = 0
-	for _, g in p.data.Gear do
-		if g.slot == sk then b += GearConfig.RarityById[g.r].income end
-	end
-	return b
-end
-local function slotIncome(p, sk, k) return keyIncome(p, k) * (1 + gearBonus(p, sk)) end
-
--- only monsters placed on base slots earn
-local function incomePerSec(p)
-	local total = 0
-	for sk, k in p.data.Placed do total += slotIncome(p, sk, k) end
-	return total
-end
-local function slotCount(p) return math.min(MAX_SLOTS, BASE_SLOTS + p.data.Rebirths) end
-
--- client-visible state; the server never reads these back
-local function publish(player, p)
-	player:SetAttribute("Index", Http:JSONEncode({ D = p.data.Discovered, O = p.data.Owned, R = p.data.Rolls }))
-	player:SetAttribute("Skills", Http:JSONEncode(p.data.Skills))
-	player:SetAttribute("Luck", effLuck(p))
-	player:SetAttribute("MaxTier", dieOf(p).maxTier)
-	player:SetAttribute("Dice", Http:JSONEncode(p.data.Dice))
-	player:SetAttribute("SelectedDie", dieOf(p).id)
-	player:SetAttribute("Gear", Http:JSONEncode(p.data.Gear))
-	player:SetAttribute("BattleProgress", Http:JSONEncode(p.data.BattleProgress))
-	player:SetAttribute("Placed", Http:JSONEncode(p.data.Placed))
-	player:SetAttribute("Slots", slotCount(p))
-	player:SetAttribute("Rebirths", p.data.Rebirths)
-end
-local function publishCash(player, p)
-	local ls = player:FindFirstChild("leaderstats")
-	if ls then ls.Cash.Value = math.floor(p.data.Cash) end
-	player:SetAttribute("Cash", p.data.Cash)
-	player:SetAttribute("CashPerSec", incomePerSec(p))
-end
 local function applyWalk(player, p)
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = 16 + stat(p, "walkspeed") end
+	if hum then hum.WalkSpeed = 16 + Game.stat(p, "walkspeed") end
 end
 
-local function load(player)
-	local ok, data
-	for i = 1, store and 3 or 0 do
-		ok, data = pcall(store.GetAsync, store, key(player))
-		if ok then break end
-		warn("Load failed for", player.Name, data)
-		task.wait(i * 2)
+-- BASE: plot lookup, generated upper floors, slot rendering
+local function plotOf(player)
+	local id = player:GetAttribute("PlotId")
+	local hub = workspace:FindFirstChild("Hub")
+	local plots = hub and hub:FindFirstChild("Plots")
+	return id and plots and plots:FindFirstChild("Plot" .. id)
+end
+-- floor 1 slots are Plot.SlotN; upper floors are Plot.Floor2/Floor3 (built in Studio or generated below)
+local function slotPart(plot, i)
+	local s = plot:FindFirstChild("Slot" .. i)
+	if s then return s end
+	for f = 2, F.MAX_FLOORS do
+		local fl = plot:FindFirstChild("Floor" .. f)
+		s = fl and fl:FindFirstChild("Slot" .. i)
+		if s then return s end
 	end
-	if not player.Parent then return end
-	if ok then
-		profiles[player] = { data = migrate(data or default()), saveable = true }
-	elseif RunService:IsStudio() then
-		warn("DataStore unavailable in Studio; playing without saving (publish + enable Studio API access to test saves)")
-		profiles[player] = { data = default(), saveable = false }
-	else
-		-- never start a session that could overwrite a real save with defaults
-		player:Kick("Couldn't load your save. Your data is safe, please rejoin.")
-		return
+	return nil
+end
+local function part(parent, size, cf, color, props)
+	local p = Instance.new("Part") p.Anchored = true p.Size = size p.CFrame = cf p.Color = color p.TopSurface = Enum.SurfaceType.Studs
+	for k, v in props or {} do p[k] = v end
+	p.Parent = parent
+	return p
+end
+local function label(adornee, name, text, offset)
+	local b = Instance.new("BillboardGui") b.Name = name b.Size = UDim2.fromScale(8, 2) b.StudsOffset = offset b.MaxDistance = 120
+	local t = Instance.new("TextLabel") t.Name = "Label" t.Size = UDim2.fromScale(1, 1) t.BackgroundTransparency = 1 t.TextScaled = true
+	t.Font = Enum.Font.FredokaOne t.Text = text t.TextColor3 = Color3.new(1, 1, 1) t.TextStrokeTransparency = 0 t.Parent = b
+	b.Parent = adornee
+	return b
+end
+-- placeholder deck + slot pedestals for floor f, stacked above the plot's Base
+local function buildFloor(plot, f)
+	local base = plot:FindFirstChild("Base")
+	if not base then return end
+	local c = plot:GetAttribute("Color") or base.Color
+	local m = Instance.new("Model") m.Name = "Floor" .. f m:SetAttribute("Generated", true)
+	local o = base.CFrame * CFrame.new(0, FLOOR_H * (f - 1), 0)
+	m.PrimaryPart = part(m, Vector3.new(base.Size.X, 2, base.Size.Z), o, c:Lerp(Color3.new(1, 1, 1), 0.3), { Name = "Deck" })
+	label(m.PrimaryPart, "FloorSign", "Floor " .. f .. " (placeholder)", Vector3.new(0, 8, 0))
+	local ids = {}
+	for i = 1, F.MAX_SLOTS do if F.slotFloor(i) == f then table.insert(ids, i) end end
+	local cols = math.min(6, #ids)
+	local rows = math.ceil(#ids / 6)
+	for k, i in ids do
+		local x, z = ((k - 1) % 6 - (cols - 1) / 2) * 12, ((k - 1) // 6 - (rows - 1) / 2) * 12
+		local s = part(m, Vector3.new(8, 1, 8), o * CFrame.new(x, 1.5, z), c:Lerp(Color3.new(0, 0, 0), 0.25), { Name = "Slot" .. i })
+		s:SetAttribute("SlotIndex", i) s:SetAttribute("RequiredRebirth", F.slotRebirth(i))
+		label(s, "Income", "$0", Vector3.new(0, 3, 0))
 	end
-	local p = profiles[player]
+	m.Parent = plot
+end
+-- elevator pads (back of the centre walkway on every floor) with one prompt per other unlocked floor
+local function floorPivot(plot, f)
+	local base = plot:FindFirstChild("Base")
+	return base and base.CFrame * CFrame.new(0, FLOOR_H * (f - 1) + 2, -22)
+end
+local function buildElevators(plot, floors)
+	for _, e in plot:GetChildren() do if e.Name == "Elevator" then e:Destroy() end end
+	if floors < 2 then return end
+	for from = 1, floors do
+		local cf = floorPivot(plot, from)
+		if not cf then return end
+		local pad = part(plot, Vector3.new(8, 0.4, 8), cf * CFrame.new(0, -0.8, 0), Color3.fromRGB(255, 215, 80),
+			{ Name = "Elevator", Material = Enum.Material.Neon, CanCollide = false })
+		for to = 1, floors do
+			if to ~= from then
+				local pp = Instance.new("ProximityPrompt") pp.ActionText = "Go to Floor " .. to pp.ObjectText = "Elevator"
+				pp.HoldDuration = 0 pp.MaxActivationDistance = 10 pp.RequiresLineOfSight = false pp.Parent = pad
+				pp.Triggered:Connect(function(who)
+					local char, dest = who.Character, floorPivot(plot, to)
+					if char and dest and (to == 1 or plot:FindFirstChild("Floor" .. to)) then char:PivotTo(dest + Vector3.new(0, 3, 0)) end
+				end)
+			end
+		end
+	end
+end
+local function ensureFloors(plot, floors)
+	for f = 2, F.MAX_FLOORS do
+		local fl = plot:FindFirstChild("Floor" .. f)
+		if f <= floors and not fl then buildFloor(plot, f)
+		elseif f > floors and fl and fl:GetAttribute("Generated") then fl:Destroy() end
+	end
+	if plot:GetAttribute("BuiltFloors") ~= floors then
+		plot:SetAttribute("BuiltFloors", floors)
+		buildElevators(plot, floors)
+	end
+end
+
+-- p = nil clears the slot. A placement whose model is missing keeps its record and shows a placeholder.
+local function renderSlot(player, p, i)
+	local plot = plotOf(player)
+	local slot = plot and slotPart(plot, i)
+	if not slot then return end
+	local shown = plot:FindFirstChild("Placed") or Instance.new("Folder")
+	shown.Name = "Placed" shown.Parent = plot
+	for _, g in slot:GetChildren() do -- "Rebirth N" lock signs, hidden once unlocked
+		if g:IsA("BillboardGui") and g.Name ~= "Income" then g.Enabled = not (p and i <= Game.slotCount(p)) end
+	end
+	local iid = p and p.data.Placed[tostring(i)]
+	local inst = iid and p.data.Monsters[iid]
+	local pad = plot:FindFirstChild("Collect" .. i) or slot:FindFirstChild("Income")
+	local text = pad and pad:FindFirstChild("Label", true)
+	if text then text.Text = inst and ("$" .. short(Game.income(p, iid)) .. "/s") or "$0" end
+	local old = shown:FindFirstChild("Slot" .. i)
+	if old and inst and old:GetAttribute("Iid") == iid then return end
+	if old then old:Destroy() end
+	if not inst then return end
+	local def = Config.ById[inst.id]
+	local m = def and MonsterModel.build(def, inst.v) or Assets.CreateAsset("Monsters", inst.id, nil, Vector3.new(4, 4, 4))
+	m.Name = "Slot" .. i
+	m:SetAttribute("Iid", iid)
+	local top = slot.Position + Vector3.new(0, slot.Size.Y / 2, 0)
+	m:PivotTo(CFrame.lookAt(top, top - slot.CFrame.LookVector) * CFrame.new(0, def and 0 or 2, 0))
+	m.Parent = shown
+end
+local function renderAll(player, p)
+	local plot = plotOf(player)
+	if not plot then return end
+	if not p then
+		local shown = plot:FindFirstChild("Placed")
+		if shown then shown:ClearAllChildren() end
+	end
+	ensureFloors(plot, p and F.floors(p.data.Rebirths) or 1)
+	for i = 1, F.MAX_SLOTS do renderSlot(player, p, i) end
+end
+Game.BaseChanged.Event:Connect(function(player)
+	local p = Game.get(player)
+	if p then renderAll(player, p) end
+end)
+
+-- JOIN: leaderstats, offline earnings from saved server timestamps, first publish
+Data.onLoaded(function(player, p)
 	local ls = Instance.new("Folder") ls.Name = "leaderstats"
 	local cash = Instance.new("NumberValue") cash.Name = "Cash" cash.Parent = ls
+	local reb = Instance.new("IntValue") reb.Name = "Rebirths" reb.Parent = ls
 	ls.Parent = player
-	publish(player, p)
-	publishCash(player, p)
+	local d = p.data
+	if d.LastOnline then
+		local amount, secs = F.offline(os.time() - d.LastOnline, Game.incomePerSec(p))
+		if amount > 0 then
+			Game.addCash(p, amount)
+			local s = Game.state(player)
+			if s then s:SetAttribute("OfflineEarnings", Http:JSONEncode({ amount = amount, secs = secs })) end
+		end
+	end
+	Game.publish(player, p)
 	player.CharacterAdded:Connect(function() task.defer(applyWalk, player, p) end)
 	applyWalk(player, p)
-	player:GetAttributeChangedSignal("PlotId"):Connect(function() renderAll(player, profiles[player]) end)
+	player:GetAttributeChangedSignal("PlotId"):Connect(function() renderAll(player, Game.get(player)) end)
 	renderAll(player, p)
-end
-
-local function save(player)
-	local p = profiles[player]
-	if not p or not p.saveable then return end
-	for i = 1, 3 do
-		-- ponytail: no session lock; add one before trading or cross-server teleports exist
-		local ok, err = pcall(store.UpdateAsync, store, key(player), function() return p.data end)
-		if ok then return end
-		warn("Save failed for", player.Name, err)
-		task.wait(i)
-	end
-end
-
-Players.PlayerAdded:Connect(load)
-for _, pl in Players:GetPlayers() do task.defer(load, pl) end -- defer: renderAll is assigned further down
-Players.PlayerRemoving:Connect(function(player)
-	renderAll(player, nil) -- clear their monsters off the plot
-	save(player)
-	profiles[player] = nil
-	lastAction[player] = nil
 end)
-game:BindToClose(function()
-	local left = 0
-	for player in profiles do
-		left += 1
-		task.spawn(function() save(player) left -= 1 end)
-	end
-	while left > 0 do task.wait() end
-end)
+Players.PlayerRemoving:Connect(function(player) renderAll(player, nil) end)
+
+-- INCOME: one loop for everyone, 1 s ticks
 task.spawn(function()
-	local t = 0
 	while true do
 		task.wait(1)
-		t += 1
-		for player, p in profiles do
-			p.data.Cash = math.min(MAX_CASH, p.data.Cash + incomePerSec(p))
-			publishCash(player, p)
-			if t % 60 == 0 then task.spawn(save, player) end
+		for player, p in Data.all() do
+			if not p.released then
+				Game.addCash(p, Game.incomePerSec(p))
+				Game.publishCash(player, p)
+			end
 		end
 	end
 end)
 
+-- ROLLING (summon prompt; the server picks the result)
 local function showRoll(player, core, def, variant)
 	local m = MonsterModel.build(def, variant)
 	local root = player.Character and player.Character.PrimaryPart
@@ -188,342 +217,223 @@ local function showRoll(player, core, def, variant)
 	Debris:AddItem(m, 4)
 end
 
-local summon = workspace:WaitForChild("Hub"):WaitForChild("Shops"):WaitForChild("SummonArea"):WaitForChild("SummonCore")
-summon:WaitForChild("ProximityPrompt").Triggered:Connect(function(player)
-	local p = profiles[player]
+local function roll(player, core)
+	local p = Game.get(player)
 	if not p then return end
-	local now = os.clock()
-	if lastAction[player] and now - lastAction[player] < ROLL_COOLDOWN * (1 - math.min(0.75, stat(p, "rollspeed"))) then return end
-	lastAction[player] = now
-
-	local def, variant = Config.roll(rng, effLuck(p), dieOf(p).maxTier)
+	if not Guard.rate(player, "roll", ROLL_COOLDOWN * (1 - math.min(0.75, Game.stat(p, "rollspeed")))) then return end
 	local d = p.data
+	if Game.count(d.Monsters) >= Game.capacity(p) then
+		Game.notify(player, "Backpack full (" .. Game.capacity(p) .. "). Sell or fuse monsters to roll again.")
+		return
+	end
+	local die = Game.die(p)
+	if not d.Dice[die.id] then d.SelectedDie = "grassland" die = Game.die(p) end
+	local def, variant = Config.roll(rng, Game.luck(p), die.maxTier, die.id)
+	if not def then warn("Empty roll pool for die", die.id) return end
 	d.Rolls += 1
-	local disc = d.Discovered[def.id] or {}
-	local isNew = not disc[variant]
-	disc[variant] = true
-	d.Discovered[def.id] = disc
-	local k = def.id .. "|" .. variant
-	d.Owned[k] = (d.Owned[k] or 0) + 1
-
-	publish(player, p)
-	publishCash(player, p)
-	player:SetAttribute("LastRoll", Http:JSONEncode({ id = def.id, v = variant, new = isNew, n = d.Rolls }))
-	showRoll(player, summon, def, variant)
+	local iid, isNew = Game.addMonster(p, def, variant)
+	Game.publish(player, p, "Index", "Monsters")
+	local s = Game.state(player)
+	if s then s:SetAttribute("LastRoll", Http:JSONEncode({ id = def.id, v = variant, new = isNew, n = d.Rolls, iid = iid })) end
+	if Config.Tier[def.rarity] >= 5 or variant ~= "Normal" then Data.saveSoon(player) end
+	showRoll(player, core, def, variant)
+end
+task.spawn(function() -- the summon station may be a placeholder made by HubFallback; don't block the remotes below
+	local summon = workspace:WaitForChild("Hub"):WaitForChild("Shops"):WaitForChild("SummonArea"):WaitForChild("SummonCore")
+	summon:WaitForChild("ProximityPrompt").Triggered:Connect(function(player) roll(player, summon) end)
 end)
 
-local function short(n)
-	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
-		if n >= u[1] then return (("%.1f"):format(n / u[1]):gsub("%.0$", "")) .. u[2] end
+-- PLACEMENT: iid = nil removes whatever is on the slot
+M.PlaceMonster.OnServerInvoke = function(player, slot, iid)
+	local p = Game.get(player)
+	if not p then return false, "Still loading" end
+	if not Guard.rate(player, "place", 0.15) then return false, "Too fast" end
+	slot = Guard.int(slot, 1, F.MAX_SLOTS)
+	if not slot then return false, "Bad slot" end
+	if slot > Game.slotCount(p) then return false, "Unlocks at Rebirth " .. F.slotRebirth(slot) end
+	if not plotOf(player) then return false, "You don't have a plot" end
+	local placed, sk = p.data.Placed, tostring(slot)
+	if iid == nil then
+		placed[sk] = nil
+	else
+		iid = Guard.str(iid)
+		if not iid or not p.data.Monsters[iid] then return false, "You don't own that monster" end
+		if placed[sk] == iid then return true end
+		if placed[sk] then return false, "That slot is taken" end
+		local other = Game.slotOf(p, iid)
+		if other then return false, "Already placed on slot " .. other end
+		placed[sk] = iid
 	end
-	return n < 100 and (("%.1f"):format(n):gsub("%.0$", "")) or tostring(math.floor(n))
-end
-local function plotOf(player)
-	local id = player:GetAttribute("PlotId")
-	return id and workspace.Hub.Plots:FindFirstChild("Plot" .. id)
-end
--- p = nil clears the slot
-local function renderSlot(player, p, i)
-	local plot = plotOf(player)
-	local slot = plot and plot:FindFirstChild("Slot" .. i)
-	if not slot then return end
-	local shown = plot:FindFirstChild("Placed") or Instance.new("Folder")
-	shown.Name = "Placed" shown.Parent = plot
-	local old = shown:FindFirstChild("Slot" .. i)
-	if old then old:Destroy() end
-	local lockLabel = slot:FindFirstChildOfClass("BillboardGui") -- "Rebirth N" sign, hidden once unlocked
-	if lockLabel then lockLabel.Enabled = not (p and i <= slotCount(p)) end
-	local k = p and p.data.Placed[tostring(i)]
-	local pad = plot:FindFirstChild("Collect" .. i)
-	local label = pad and pad:FindFirstChild("Label", true)
-	if label then label.Text = k and ("$" .. short(slotIncome(p, tostring(i), k)) .. "/s") or "$0" end
-	if not k then return end
-	local id, variant = string.match(k, "^(.-)|(.+)$")
-	local def = Config.ById[id]
-	if not def then return end -- unknown id: keep the record, show nothing
-	local m = MonsterModel.build(def, variant)
-	m.Name = "Slot" .. i
-	local top = slot.Position + Vector3.new(0, slot.Size.Y / 2, 0)
-	m:PivotTo(CFrame.lookAt(top, top - slot.CFrame.LookVector))
-	m.Parent = shown
-end
-renderAll = function(player, p)
-	for i = 1, MAX_SLOTS do renderSlot(player, p, i) end
+	Game.publish(player, p, "Placed")
+	renderSlot(player, p, slot)
+	Data.saveSoon(player)
+	return true
 end
 
-local lastBuy = {}
-RS.Monster.BuySkill.OnServerInvoke = function(player, nodeId)
-	local p = profiles[player]
+-- INVENTORY: upgrade | lock | fav | sell | fuse
+local function owned(p, iid) iid = Guard.str(iid) return iid and p.data.Monsters[iid], iid end
+local function nameOf(inst)
+	local def = Config.ById[inst.id]
+	return (inst.v ~= "Normal" and inst.v .. " " or "") .. (def and def.name or inst.id)
+end
+local function copies(p, inst)
+	local n = 0
+	for _, m in p.data.Monsters do if m.id == inst.id and m.v == inst.v then n += 1 end end
+	return n
+end
+M.InventoryAction.OnServerInvoke = function(player, action, a, b)
+	local p = Game.get(player)
 	if not p then return false, "Still loading" end
-	if typeof(nodeId) ~= "string" then return false, "Bad request" end
-	local node = Tree.ById[nodeId]
+	if not Guard.rate(player, "inventory", 0.15) then return false, "Too fast" end
+	local d = p.data
+	if action == "upgrade" then
+		local inst, iid = owned(p, a)
+		if not inst then return false, "You don't own that monster" end
+		if inst.lvl >= F.MAX_LEVEL then return false, "Max level" end
+		local cost = F.upgradeCost(Game.baseIncome(inst), inst.lvl)
+		if not Game.spend(p, cost) then return false, "Need $" .. short(cost) end
+		inst.lvl += 1
+		Game.publish(player, p, "Monsters")
+		local sk = Game.slotOf(p, iid)
+		if sk then renderSlot(player, p, tonumber(sk)) end
+		return true
+	elseif action == "lock" or action == "fav" then
+		local inst = owned(p, a)
+		if not inst then return false, "You don't own that monster" end
+		inst[action] = b == true or nil
+		Game.publish(player, p, "Monsters")
+		return true
+	elseif action == "sell" then
+		local ids = Guard.ids(a, 100)
+		if not ids then return false, "Bad request" end
+		local total, selling = 0, {}
+		for _, iid in ids do -- validate everything before touching anything
+			local inst = d.Monsters[iid]
+			if not inst then return false, "You don't own that monster" end
+			if inst.lock then return false, nameOf(inst) .. " is locked" end
+			if Game.slotOf(p, iid) then return false, "Remove " .. nameOf(inst) .. " from your base first" end
+			local k = inst.id .. "|" .. inst.v
+			selling[k] = (selling[k] or 0) + 1
+			local def = Config.ById[inst.id]
+			if b ~= true and def and Config.Tier[def.rarity] >= 3 and selling[k] >= copies(p, inst) then
+				return false, "That's your last " .. nameOf(inst) .. ". Sell anyway?", "confirm"
+			end
+			total += F.sellValue(Game.baseIncome(inst), inst.lvl, Game.stat(p, "sell"))
+		end
+		for _, iid in ids do Game.removeMonster(p, iid) end
+		Game.addCash(p, total)
+		Game.publish(player, p, "Monsters", "Index", "Team", "Gear")
+		Data.saveSoon(player)
+		return true, total
+	elseif action == "fuse" then
+		local target, tid = owned(p, a)
+		local mats = Guard.ids(b, F.FUSE_COPIES - 1)
+		if not target then return false, "You don't own that monster" end
+		if not mats or #mats ~= F.FUSE_COPIES - 1 then return false, "Pick " .. (F.FUSE_COPIES - 1) .. " copies to fuse in" end
+		if target.fr >= F.MAX_FUSION then return false, "Max fusion rank" end
+		for _, iid in mats do
+			local inst = d.Monsters[iid]
+			if iid == tid or not inst then return false, "Bad fusion copies" end
+			if inst.id ~= target.id or inst.v ~= target.v then return false, "Copies must be the same monster and variant" end
+			if inst.lock then return false, nameOf(inst) .. " is locked" end
+			if Game.slotOf(p, iid) then return false, "Remove the copies from your base first" end
+		end
+		local cost = F.fuseCost(Game.baseIncome(target), target.fr)
+		if not Game.spend(p, cost) then return false, "Need $" .. short(cost) end
+		for _, iid in mats do Game.removeMonster(p, iid) end
+		target.fr += 1
+		Game.publish(player, p, "Monsters", "Index", "Team", "Gear")
+		local sk = Game.slotOf(p, tid)
+		if sk then renderSlot(player, p, tonumber(sk)) end
+		Data.saveSoon(player)
+		return true
+	end
+	return false, "Bad request"
+end
+
+-- SKILL TREE
+M.BuySkill.OnServerInvoke = function(player, nodeId)
+	local p = Game.get(player)
+	if not p then return false, "Still loading" end
+	if not Guard.rate(player, "skill", 0.2) then return false, "Too fast" end
+	local node = Guard.str(nodeId) and Tree.ById[nodeId]
 	if not node then return false, "Unknown upgrade" end
-	local now = os.clock()
-	if lastBuy[player] and now - lastBuy[player] < 0.2 then return false, "Too fast" end
-	lastBuy[player] = now
 	local skills = p.data.Skills
 	if skills[nodeId] then return false, "Already owned" end
 	if node.requires and not skills[node.requires] then return false, "Locked" end
-	if p.data.Cash < node.cost then return false, "Not enough cash" end
-	p.data.Cash -= node.cost
+	if not Game.spend(p, node.cost) then return false, "Not enough cash" end
 	skills[nodeId] = true
-	publish(player, p)
-	publishCash(player, p)
+	Game.publish(player, p) -- income/luck/combat previews all move
 	applyWalk(player, p)
 	renderAll(player, p) -- pad income labels change with Money nodes
+	Data.saveSoon(player)
 	return true
 end
 
-RS.Monster.PlaceMonster.OnServerInvoke = function(player, slot, k)
-	local p = profiles[player]
+-- DICE SHOP: action = "buy" | "equip"
+M.DiceAction.OnServerInvoke = function(player, action, dieId)
+	local p = Game.get(player)
 	if not p then return false, "Still loading" end
-	local now = os.clock()
-	if lastBuy[player] and now - lastBuy[player] < 0.15 then return false, "Too fast" end
-	lastBuy[player] = now
-	if typeof(slot) ~= "number" or slot % 1 ~= 0 or slot < 1 or slot > MAX_SLOTS then return false, "Bad slot" end
-	if slot > slotCount(p) then return false, "Unlocks at Rebirth " .. (slot - BASE_SLOTS) end
-	if not plotOf(player) then return false, "You don't have a plot" end
-	local placed, sk = p.data.Placed, tostring(slot)
-	if k == nil then
-		placed[sk] = nil
-	else
-		if typeof(k) ~= "string" then return false, "Bad request" end
-		local owned = p.data.Owned[k] or 0
-		local inUse = 0
-		for s2, v in placed do if v == k and s2 ~= sk then inUse += 1 end end
-		if inUse >= owned then return false, "You don't have a free one of those" end
-		placed[sk] = k
-	end
-	-- the monster in this slot changed: its gear goes back to the bag
-	for _, g in p.data.Gear do if g.slot == sk then g.slot = nil end end
-	publish(player, p)
-	publishCash(player, p)
-	renderSlot(player, p, slot)
-	return true
-end
-Players.PlayerRemoving:Connect(function(player) lastBuy[player] = nil end)
-
-RS.Monster.Rebirth.OnServerInvoke = function(player)
-	local p = profiles[player]
-	if not p then return false, "Still loading" end
-	local now = os.clock()
-	if lastBuy[player] and now - lastBuy[player] < 0.5 then return false, "Too fast" end
-	lastBuy[player] = now
-	local cost = RebirthConfig.cost(p.data.Rebirths)
-	if p.data.Cash < cost then return false, "Need $" .. short(cost) end
-	-- single server thread, no yields: the whole reset applies at once
-	p.data.Cash = 0
-	p.data.Rebirths += 1
-	publish(player, p)
-	publishCash(player, p)
-	renderAll(player, p)
-	task.spawn(save, player)
-	return true
-end
-
--- Studio-only QA hook (server-side bindable, unreachable from clients): ServerStorage.DevGiveCash:Invoke(player, amount)
-if RunService:IsStudio() then
-	local dev = Instance.new("BindableFunction") dev.Name = "DevGiveCash"
-	dev.OnInvoke = function(player, amount)
-		local p = profiles[player]
-		if not p then return false end
-		p.data.Cash = math.min(MAX_CASH, p.data.Cash + amount)
-		publishCash(player, p)
-		return true
-	end
-	dev.Parent = game:GetService("ServerStorage")
-	-- ServerStorage.DevGiveMonster:Invoke(player, "null_0|Monstrous", 3)
-	local devMon = Instance.new("BindableFunction") devMon.Name = "DevGiveMonster"
-	devMon.OnInvoke = function(player, k, count)
-		local p = profiles[player]
-		local id, variant = string.match(k, "^(.-)|(.+)$")
-		if not p or not Config.ById[id] or not Config.VariantById[variant] then return false end
-		p.data.Owned[k] = (p.data.Owned[k] or 0) + (count or 1)
-		p.data.Discovered[id] = p.data.Discovered[id] or {}
-		p.data.Discovered[id][variant] = true
-		publish(player, p)
-		return true
-	end
-	devMon.Parent = game:GetService("ServerStorage")
-end
-
--- action = "buy" | "equip"
-RS.Monster.DiceAction.OnServerInvoke = function(player, action, dieId)
-	local p = profiles[player]
-	if not p then return false, "Still loading" end
-	local now = os.clock()
-	if lastBuy[player] and now - lastBuy[player] < 0.2 then return false, "Too fast" end
-	lastBuy[player] = now
-	if typeof(dieId) ~= "string" or not DiceConfig.ById[dieId] then return false, "Unknown die" end
-	local die, owned = DiceConfig.ById[dieId], p.data.Dice
+	if not Guard.rate(player, "dice", 0.2) then return false, "Too fast" end
+	local die = Guard.str(dieId) and DiceConfig.ById[dieId]
+	if not die then return false, "Unknown die" end
+	local owned = p.data.Dice
 	if action == "buy" then
 		if owned[dieId] then return false, "Already owned" end -- never charge twice
 		local prev = DiceConfig.List[DiceConfig.Index[dieId] - 1]
 		if prev and not owned[prev.id] then return false, "Buy the " .. prev.name .. " first" end
-		if p.data.Cash < die.cost then return false, "Need $" .. short(die.cost) end
-		p.data.Cash -= die.cost
+		if not Game.spend(p, die.cost) then return false, "Need $" .. short(die.cost) end
 		owned[dieId] = true
 		p.data.SelectedDie = dieId
+		Data.saveSoon(player)
 	elseif action == "equip" then
 		if not owned[dieId] then return false, "You don't own that die" end
 		p.data.SelectedDie = dieId
 	else
 		return false, "Bad request"
 	end
-	publish(player, p)
-	publishCash(player, p)
+	Game.publish(player, p, "Dice")
 	return true
 end
 
--- action = "open" (chestId) | "equip" (gearUid, slot) | "unequip" (gearUid)
-RS.Monster.ChestAction.OnServerInvoke = function(player, action, a, b)
-	local p = profiles[player]
+-- REBIRTH: requirement check and the whole reset happen in one non-yielding step
+M.Rebirth.OnServerInvoke = function(player)
+	local p = Game.get(player)
 	if not p then return false, "Still loading" end
-	local now = os.clock()
-	if lastBuy[player] and now - lastBuy[player] < 0.25 then return false, "Too fast" end
-	lastBuy[player] = now
+	if not Guard.rate(player, "rebirth", 1) then return false, "Too fast" end
 	local d = p.data
-	if action == "open" then
-		local chest = typeof(a) == "string" and GearConfig.ChestById[a]
-		if not chest then return false, "Unknown chest" end
-		if not d.Dice[chest.die] then return false, "Needs the " .. DiceConfig.ById[chest.die].name end
-		local count = 0 for _ in d.Gear do count += 1 end
-		if count >= MAX_GEAR then return false, "Gear bag full (" .. MAX_GEAR .. ")" end
-		if d.Cash < chest.cost then return false, "Need $" .. short(chest.cost) end
-		d.Cash -= chest.cost
-		local rarity, gtype = GearConfig.roll(chest, rng)
-		local uid = "g" .. d.NextGearId
-		d.NextGearId += 1
-		d.Gear[uid] = { r = rarity, t = gtype }
-		publish(player, p)
-		publishCash(player, p)
-		return true, { uid = uid, r = rarity, t = gtype }
-	end
-	local g = typeof(a) == "string" and d.Gear[a]
-	if not g then return false, "Unknown gear" end
-	local oldSlot = g.slot
-	if action == "equip" then
-		if typeof(b) ~= "number" or b % 1 ~= 0 then return false, "Bad slot" end
-		local sk = tostring(b)
-		if not d.Placed[sk] then return false, "No monster on slot " .. sk end
-		for _, other in d.Gear do -- one of each type per monster: swap out the old one
-			if other ~= g and other.slot == sk and other.t == g.t then other.slot = nil end
-		end
-		g.slot = sk
-	elseif action == "unequip" then
-		g.slot = nil
-	else
-		return false, "Bad request"
-	end
-	publish(player, p)
-	publishCash(player, p)
-	for _, sk in { oldSlot, g.slot } do if sk then renderSlot(player, p, tonumber(sk)) end end
-	return true
+	local req = RebirthConfig.requirement(d.Rebirths)
+	if req.stage and not d.BattleProgress[req.stage] then return false, "Defeat the Overgrown Brute first" end
+	if not Game.spend(p, req.cost) then return false, "Need $" .. short(req.cost) end
+	local ap = RebirthConfig.apply(d)
+	Game.publish(player, p)
+	renderAll(player, p)
+	Data.saveSoon(player)
+	return true, { ap = ap, slots = Game.slotCount(p), floors = F.floors(d.Rebirths) }
 end
 
--- BATTLES: isolated per-player sessions held on the server; the client only sends action choices.
-local Battle = require(script.Parent.BattleEngine)
-local BattleConfig = require(RS.Monster.BattleConfig)
-local battles = {} -- [Player] = { state, stage, settled }
-
--- team = the 3 strongest monsters on your base, with their gear and Damage/Health tree nodes applied
-local function teamFor(p)
-	local team = {}
-	for sk, k in p.data.Placed do
+-- Studio-only QA hooks (server-side bindables, unreachable from clients), e.g. from the command bar:
+-- ServerStorage.DevGiveCash:Invoke(player, 1e6)  ServerStorage.DevGiveMonster:Invoke(player, "null_0|Monstrous", 3)
+-- ServerStorage.DevSetRebirths:Invoke(player, 12)
+if RunService:IsStudio() then
+	local SS = game:GetService("ServerStorage")
+	local function hook(name, fn)
+		local b = Instance.new("BindableFunction") b.Name = name
+		b.OnInvoke = function(player, ...)
+			local p = Game.get(player)
+			if not p then return false end
+			fn(p, ...)
+			Game.publish(player, p)
+			renderAll(player, p)
+			return true
+		end
+		b.Parent = SS
+	end
+	hook("DevGiveCash", function(p, amount) Game.addCash(p, amount) end)
+	hook("DevGiveMonster", function(p, k, count)
 		local id, variant = string.match(k, "^(.-)|(.+)$")
-		local def = Config.ById[id]
-		if def then
-			local st = BattleConfig.monsterStats(def, variant)
-			local wpn, arm, acc = 0, 0, 0
-			for _, g in p.data.Gear do
-				if g.slot == sk then
-					local v = GearConfig.RarityById[g.r].income
-					if g.t == "weapon" then wpn += v elseif g.t == "armor" then arm += v else acc += v end
-				end
-			end
-			st.dmg = math.floor(st.dmg * (1 + wpn) * (1 + stat(p, "damage")))
-			st.hp = math.floor(st.hp * (1 + arm) * (1 + stat(p, "health")))
-			st.spd = math.floor(st.spd * (1 + acc))
-			table.insert(team, st)
-		end
-	end
-	table.sort(team, function(x, y) return x.hp + x.dmg * 5 > y.hp + y.dmg * 5 end)
-	while #team > 3 do table.remove(team) end
-	return team
+		if not Config.ById[id] or not Config.VariantById[variant] then return end
+		for _ = 1, count or 1 do Game.addMonster(p, Config.ById[id], variant) end
+	end)
+	hook("DevSetRebirths", function(p, n) p.data.Rebirths = math.max(0, math.floor(n)) end)
 end
-
--- pays out exactly once per battle
-local function settle(player, p, b)
-	if b.settled or not b.state.over then return end
-	b.settled = true
-	local rewards = {}
-	if b.state.winner == "player" then
-		local d, stage = p.data, b.stage
-		d.Cash = math.min(MAX_CASH, d.Cash + stage.cash)
-		table.insert(rewards, "$" .. short(stage.cash))
-		if not d.BattleProgress[stage.id] then
-			d.BattleProgress[stage.id] = true
-			table.insert(rewards, "Stage cleared!")
-			if stage.firstClearGear then
-				local count = 0 for _ in d.Gear do count += 1 end
-				if count < MAX_GEAR then
-					local t = GearConfig.Types[rng:NextInteger(1, #GearConfig.Types)].id
-					d.Gear["g" .. d.NextGearId] = { r = stage.firstClearGear, t = t }
-					d.NextGearId += 1
-					table.insert(rewards, stage.firstClearGear .. " " .. GearConfig.TypeById[t].name)
-				else
-					table.insert(rewards, "(gear bag full, boss gear skipped)")
-				end
-			end
-		end
-		publish(player, p)
-		publishCash(player, p)
-		task.spawn(save, player)
-	end
-	b.rewards = rewards
-end
-local function snap(b)
-	local out = Battle.snapshot(b.state)
-	out.stage = b.stage.name
-	out.rewards = b.rewards
-	return out
-end
-
--- action = "start" (stageId) | "act" (action, targetIndex) | "leave"
-RS.Monster.BattleAction.OnServerInvoke = function(player, action, a, b2)
-	local p = profiles[player]
-	if not p then return false, "Still loading" end
-	local now = os.clock()
-	if lastBuy[player] and now - lastBuy[player] < 0.2 then return false, "Too fast" end
-	lastBuy[player] = now
-	if action == "start" then
-		local stage = typeof(a) == "string" and BattleConfig.StageById[a]
-		if not stage then return false, "Unknown stage" end
-		local prev = BattleConfig.PrevStage[stage.id]
-		if prev and not p.data.BattleProgress[prev] then return false, "Clear the previous stage first" end
-		local cur = battles[player]
-		if cur and not cur.state.over then return false, "Finish your current battle first" end
-		local team = teamFor(p)
-		if #team == 0 then return false, "Place monsters on your base to form a team" end
-		local bt = { state = Battle.new(team, stage.enemies, rng), stage = stage, settled = false }
-		battles[player] = bt
-		Battle.runEnemies(bt.state)
-		settle(player, p, bt)
-		return true, snap(bt)
-	elseif action == "act" then
-		local bt = battles[player]
-		if not bt or bt.state.over then return false, "No battle running" end
-		if Battle.current(bt.state).side ~= "player" then return false, "Not your turn" end
-		if typeof(a) ~= "string" then return false, "Bad request" end
-		local ok, err = Battle.act(bt.state, a, b2)
-		if not ok then return false, err end
-		Battle.runEnemies(bt.state)
-		settle(player, p, bt)
-		return true, snap(bt)
-	elseif action == "leave" then
-		battles[player] = nil -- fleeing forfeits; no rewards
-		return true
-	end
-	return false, "Bad request"
-end
-Players.PlayerRemoving:Connect(function(player) battles[player] = nil end)

@@ -1,4 +1,6 @@
 -- Gives each joining player a free plot, names the sign, paints it in the player's color.
+-- The server is the only one that sets Owner/PlotId; a client can never pick a plot. Full server: PlotStatus = "full"
+-- until someone leaves, then the waiting player gets the freed plot.
 local Players = game:GetService("Players")
 local plots = workspace:WaitForChild("Hub"):WaitForChild("Plots")
 
@@ -27,8 +29,10 @@ local function setSign(plot, text, color)
 end
 
 local function assign(player)
+	if not player.Parent or player:GetAttribute("PlotId") then return end
 	for _, plot in plots:GetChildren() do
 		if plot:GetAttribute("Owner") == "" then
+			player:SetAttribute("PlotStatus", nil)
 			plot:SetAttribute("Owner", tostring(player.UserId))
 			player:SetAttribute("PlotId", plot:GetAttribute("PlotId"))
 			local dark = paint(plot, Color3.fromHSV((player.UserId * 0.618) % 1, 0.55, 0.75))
@@ -44,6 +48,7 @@ local function assign(player)
 		end
 	end
 	warn("No free plot for", player.Name)
+	player:SetAttribute("PlotStatus", "full")
 end
 
 Players.PlayerAdded:Connect(assign)
@@ -56,5 +61,8 @@ Players.PlayerRemoving:Connect(function(player)
 			local dark = paint(plot, plot:GetAttribute("Color"))
 			setSign(plot, "#" .. plot:GetAttribute("PlotId") .. "\nUnclaimed", dark)
 		end
+	end
+	for _, other in Players:GetPlayers() do
+		if other ~= player and other:GetAttribute("PlotStatus") == "full" then task.defer(assign, other) break end
 	end
 end)

@@ -1,14 +1,15 @@
--- Prompts on your own plot's pedestals + a picker to place owned monsters. Server validates everything.
+-- Prompts on your own plot's pedestals (every floor) + a picker to place owned monsters. Server validates everything.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local Http = game:GetService("HttpService")
 local Config = require(RS:WaitForChild("Monster"):WaitForChild("MonsterConfig"))
+local F = require(RS.Monster:WaitForChild("Formulas"))
 local PlaceMonster = RS.Monster:WaitForChild("PlaceMonster")
 local player = Players.LocalPlayer
-local MAX_SLOTS = 10
+local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 
 local function decode(attr)
-	local ok, v = pcall(Http.JSONDecode, Http, player:GetAttribute(attr) or "")
+	local ok, v = pcall(Http.JSONDecode, Http, state:GetAttribute(attr) or "")
 	return ok and v or {}
 end
 local function short(n)
@@ -16,12 +17,6 @@ local function short(n)
 		if n >= u[1] then return (("%.1f"):format(n / u[1]):gsub("%.0$", "")) .. u[2] end
 	end
 	return tostring(math.floor(n))
-end
-local function split(k) return string.match(k, "^(.-)|(.+)$") end
-local function baseIncome(k)
-	local id, v = split(k)
-	local def = Config.ById[id]
-	return def and Config.Income[def.rarity] * (Config.VariantIncome[v] or 1) or 0
 end
 
 -- picker UI
@@ -49,71 +44,73 @@ grid.SortOrder = Enum.SortOrder.LayoutOrder grid.HorizontalAlignment = Enum.Hori
 
 local function openPicker(slot)
 	for _, c in list:GetChildren() do if c:IsA("GuiButton") then c:Destroy() end end
-	local owned, placed = decode("Index").O or {}, decode("Placed")
+	local mons, placed = decode("Monsters"), decode("Placed")
 	local used = {}
-	for _, k in placed do used[k] = (used[k] or 0) + 1 end
+	for _, iid in placed do used[iid] = true end
 	local free = {}
-	for k, n in owned do
-		if n - (used[k] or 0) > 0 then table.insert(free, { k = k, n = n - (used[k] or 0) }) end
+	for iid, m in mons do
+		if not used[iid] and Config.ById[m.id] then table.insert(free, { iid = iid, m = m }) end
 	end
-	table.sort(free, function(a, b) return baseIncome(a.k) > baseIncome(b.k) end)
-	title.Text = "Place on Slot " .. slot
+	table.sort(free, function(a, b) return a.m.inc > b.m.inc end)
+	title.Text = "Place on Slot " .. slot .. " (Floor " .. F.slotFloor(slot) .. ")"
 	msg.Text = #free == 0 and "No free monsters. Roll at the Summon Area!" or ""
 	for i, e in free do
-		local id, v = split(e.k)
-		local def = Config.ById[id]
-		if def then
-			local rar = Config.RarityById[def.rarity]
-			local b = Instance.new("TextButton") b.Text = "" b.LayoutOrder = i b.BackgroundColor3 = Color3.fromRGB(45, 48, 68) b.Parent = list
-			Instance.new("UICorner", b)
-			local st = Instance.new("UIStroke", b) st.Thickness = 3 st.Color = v ~= "Normal" and Config.VariantById[v].color or rar.color st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-			text("TextLabel", b, (v ~= "Normal" and v:upper() .. " " or "") .. def.name, UDim2.new(1, -10, 0.5, 0), UDim2.fromOffset(5, 3), rar.color)
-			text("TextLabel", b, "$" .. short(baseIncome(e.k)) .. "/s   x" .. e.n, UDim2.new(1, -10, 0.38, 0), UDim2.new(0, 5, 0.55, 0), Color3.fromRGB(120, 255, 120))
-			b.MouseButton1Click:Connect(function()
-				local ok, err = PlaceMonster:InvokeServer(slot, e.k)
-				if ok then panel.Visible = false else msg.Text = err end
-			end)
-		end
+		local def, v = Config.ById[e.m.id], e.m.v
+		local rar = Config.RarityById[def.rarity]
+		local b = Instance.new("TextButton") b.Text = "" b.LayoutOrder = i b.BackgroundColor3 = Color3.fromRGB(45, 48, 68) b.Parent = list
+		Instance.new("UICorner", b)
+		local st = Instance.new("UIStroke", b) st.Thickness = 3 st.Color = v ~= "Normal" and Config.VariantById[v].color or rar.color st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		text("TextLabel", b, (v ~= "Normal" and v:upper() .. " " or "") .. def.name, UDim2.new(1, -10, 0.5, 0), UDim2.fromOffset(5, 3), rar.color)
+		text("TextLabel", b, "$" .. short(e.m.inc) .. "/s   Lv " .. e.m.lvl .. (e.m.fr > 0 and ("  ★" .. e.m.fr) or ""), UDim2.new(1, -10, 0.38, 0), UDim2.new(0, 5, 0.55, 0), Color3.fromRGB(120, 255, 120))
+		b.MouseButton1Click:Connect(function()
+			local ok, err = PlaceMonster:InvokeServer(slot, e.iid)
+			if ok then panel.Visible = false else msg.Text = err end
+		end)
 	end
 	panel.Visible = true
 end
 
--- local prompts, only on my plot (nobody else sees them)
+-- local prompts, only on my plot (nobody else sees them); upper floors appear as rebirths unlock them
 local prompts = {}
 local function refreshPrompts()
-	local placed, slots = decode("Placed"), player:GetAttribute("Slots") or 5
+	local placed, slots = decode("Placed"), state:GetAttribute("Slots") or 5
 	for i, pp in prompts do
 		local unlocked = i <= slots
-		pp.Enabled = true
-		pp.ActionText = not unlocked and ("Locked: Rebirth " .. (i - 5)) or (placed[tostring(i)] and "Remove" or "Place Monster")
+		pp.ActionText = not unlocked and ("Locked: Rebirth " .. F.slotRebirth(i)) or (placed[tostring(i)] and "Remove" or "Place Monster")
 		pp.ObjectText = "Slot " .. i
 	end
 end
+local function addSlot(slot)
+	local i = slot:IsA("BasePart") and slot:GetAttribute("SlotIndex")
+	if not i or prompts[i] then return end
+	local pp = Instance.new("ProximityPrompt") pp.HoldDuration = 0 pp.MaxActivationDistance = 10 pp.RequiresLineOfSight = false
+	pp.Parent = slot
+	prompts[i] = pp
+	pp.Triggered:Connect(function()
+		if i > (state:GetAttribute("Slots") or 5) then return end
+		if decode("Placed")[tostring(i)] then
+			PlaceMonster:InvokeServer(i, nil)
+		else
+			openPicker(i)
+		end
+	end)
+	pp.Destroying:Connect(function() if prompts[i] == pp then prompts[i] = nil end end)
+end
+local conn
 local function setup()
 	for _, pp in prompts do pp:Destroy() end
 	table.clear(prompts)
+	if conn then conn:Disconnect() conn = nil end
 	local id = player:GetAttribute("PlotId")
 	local plot = id and workspace:WaitForChild("Hub"):WaitForChild("Plots"):WaitForChild("Plot" .. id, 10)
 	if not plot then return end
-	for i = 1, MAX_SLOTS do
-		local slot = plot:WaitForChild("Slot" .. i, 10)
-		if slot then
-			local pp = Instance.new("ProximityPrompt") pp.HoldDuration = 0 pp.MaxActivationDistance = 10 pp.RequiresLineOfSight = false
-			pp.Parent = slot
-			prompts[i] = pp
-			pp.Triggered:Connect(function()
-				if i > (player:GetAttribute("Slots") or 5) then return end
-				if decode("Placed")[tostring(i)] then
-					PlaceMonster:InvokeServer(i, nil)
-				else
-					openPicker(i)
-				end
-			end)
-		end
-	end
+	for _, d in plot:GetDescendants() do addSlot(d) end
+	conn = plot.DescendantAdded:Connect(function(d)
+		task.defer(function() addSlot(d) refreshPrompts() end) -- attributes land with the part; defer to read them
+	end)
 	refreshPrompts()
 end
 player:GetAttributeChangedSignal("PlotId"):Connect(setup)
-player:GetAttributeChangedSignal("Placed"):Connect(refreshPrompts)
-player:GetAttributeChangedSignal("Slots"):Connect(refreshPrompts)
+state:GetAttributeChangedSignal("Placed"):Connect(refreshPrompts)
+state:GetAttributeChangedSignal("Slots"):Connect(refreshPrompts)
 setup()

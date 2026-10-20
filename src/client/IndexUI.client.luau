@@ -6,6 +6,7 @@ local Http = game:GetService("HttpService")
 local Config = require(RS:WaitForChild("Monster"):WaitForChild("MonsterConfig"))
 local MonsterModel = require(RS.Monster.MonsterModel)
 local player = Players.LocalPlayer
+local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 
 local FONT = Enum.Font.FredokaOne
 local function corner(o, r) local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, r or 12) c.Parent = o end
@@ -19,9 +20,9 @@ local function fmt(n)
 	if n >= 1e9 then return ("%.1fB"):format(n / 1e9) elseif n >= 1e6 then return ("%.1fM"):format(n / 1e6) elseif n >= 1e4 then return ("%.1fK"):format(n / 1e3) end
 	return tostring(math.floor(n + 0.5))
 end
--- the player's real odds: luck + equipped die's rarity cap (published by the server)
+-- the player's real odds: effective luck + equipped die's rarity cap and pool (published by the server)
 local function oneIn(rarity)
-	local p = Config.oddsFor(player:GetAttribute("Luck") or 1, player:GetAttribute("MaxTier"))[rarity] or 0
+	local p = Config.oddsFor(state:GetAttribute("Luck") or 1, state:GetAttribute("MaxTier"), state:GetAttribute("SelectedDie"))[rarity] or 0
 	return p > 0 and "1 in " .. fmt(1 / p) or "better die needed"
 end
 
@@ -97,7 +98,7 @@ local function render(c, def, found)
 end
 
 function refreshAll()
-	local ok, data = pcall(Http.JSONDecode, Http, player:GetAttribute("Index") or "")
+	local ok, data = pcall(Http.JSONDecode, Http, state:GetAttribute("Index") or "")
 	if not ok then data = { D = {}, O = {}, R = 0 } end
 	local found = 0
 	for _, def in Config.Monsters do
@@ -118,17 +119,17 @@ local function setOpen(open) panel.Visible = open if open then refreshAll() end 
 hud.MouseButton1Click:Connect(function() setOpen(not panel.Visible) end)
 close.MouseButton1Click:Connect(function() setOpen(false) end)
 PPS.PromptTriggered:Connect(function(prompt) if prompt:FindFirstAncestor("Index") then setOpen(true) end end)
-player:GetAttributeChangedSignal("Index"):Connect(function() if panel.Visible then refreshAll() end end)
-player:GetAttributeChangedSignal("Luck"):Connect(function() if panel.Visible then refreshAll() end end)
-player:GetAttributeChangedSignal("MaxTier"):Connect(function() if panel.Visible then refreshAll() end end)
+state:GetAttributeChangedSignal("Index"):Connect(function() if panel.Visible then refreshAll() end end)
+state:GetAttributeChangedSignal("Luck"):Connect(function() if panel.Visible then refreshAll() end end)
+state:GetAttributeChangedSignal("SelectedDie"):Connect(function() if panel.Visible then refreshAll() end end)
 
 -- roll toast
 local toast = text("TextLabel", gui, "", UDim2.fromScale(0.6, 0.08), UDim2.fromScale(0.5, 0.1))
 toast.AnchorPoint = Vector2.new(0.5, 0) toast.Visible = false
 local tlim = Instance.new("UISizeConstraint") tlim.MaxSize = Vector2.new(640, 70) tlim.Parent = toast
 local shown = 0
-player:GetAttributeChangedSignal("LastRoll"):Connect(function()
-	local ok, r = pcall(Http.JSONDecode, Http, player:GetAttribute("LastRoll"))
+state:GetAttributeChangedSignal("LastRoll"):Connect(function()
+	local ok, r = pcall(Http.JSONDecode, Http, state:GetAttribute("LastRoll"))
 	local def = ok and Config.ById[r.id]
 	if not def then return end
 	local v = Config.VariantById[r.v]

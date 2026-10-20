@@ -6,6 +6,7 @@ local Http = game:GetService("HttpService")
 local Tree = require(RS:WaitForChild("Monster"):WaitForChild("SkillTree"))
 local BuySkill = RS.Monster:WaitForChild("BuySkill")
 local player = Players.LocalPlayer
+local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 
 local BLACK = Color3.new(0, 0, 0)
 local OWNED, AVAIL, HIDDEN = Color3.fromRGB(0, 170, 255), Color3.fromRGB(48, 48, 56), Color3.fromRGB(36, 36, 42)
@@ -81,13 +82,13 @@ for _, node in Tree.Nodes do
 end
 
 local function decode(attr, fallback)
-	local ok, v = pcall(Http.JSONDecode, Http, player:GetAttribute(attr) or "")
+	local ok, v = pcall(Http.JSONDecode, Http, state:GetAttribute(attr) or "")
 	return ok and v or fallback
 end
 local function refresh()
 	local skills = decode("Skills", { start = true })
-	local cash = player:GetAttribute("Cash") or 0
-	cashL.Text = "💵 $" .. fmt(cash) .. "   (+" .. fmt(player:GetAttribute("CashPerSec") or 0) .. "/s)"
+	local cash = state:GetAttribute("Cash") or 0
+	cashL.Text = "💵 $" .. fmt(cash) .. "   (+" .. fmt(state:GetAttribute("CashPerSec") or 0) .. "/s)"
 	for id, w in widgets do
 		local node = w.node
 		w.state = skills[id] and "owned" or ((not node.requires or skills[node.requires]) and "avail" or "hidden")
@@ -99,8 +100,8 @@ local function refresh()
 		w.price.TextColor3 = cash >= node.cost and Color3.fromRGB(90, 255, 90) or Color3.fromRGB(255, 80, 80)
 	end
 end
-player:GetAttributeChangedSignal("Skills"):Connect(refresh)
-player:GetAttributeChangedSignal("Cash"):Connect(function() if gui.Enabled then refresh() end end)
+state:GetAttributeChangedSignal("Skills"):Connect(refresh)
+state:GetAttributeChangedSignal("Cash"):Connect(function() if gui.Enabled then refresh() end end)
 
 local close = Instance.new("TextButton") close.AnchorPoint = Vector2.new(0.5, 1) close.Position = UDim2.new(0.5, 0, 1, -24) close.Size = UDim2.fromOffset(240, 66)
 close.BackgroundColor3 = Color3.fromRGB(230, 40, 40) close.Text = "" close.ZIndex = 10 close.Parent = gui

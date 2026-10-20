@@ -3,8 +3,10 @@ local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local Http = game:GetService("HttpService")
 local B = require(RS:WaitForChild("Monster"):WaitForChild("BattleConfig"))
+local Dice = require(RS.Monster:WaitForChild("DiceConfig"))
 local BattleAction = RS.Monster:WaitForChild("BattleAction")
 local player = Players.LocalPlayer
+local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 local ICON = { Nature = "🌿", Earth = "🟫", Water = "💧", Fire = "🔥", Lightning = "⚡", Light = "✨", Shadow = "🌑", Cosmic = "🌌" }
 
 local function short(n)
@@ -32,7 +34,7 @@ local function bar(parent, pos, color, frac)
 	Instance.new("UICorner", f).CornerRadius = UDim.new(1, 0)
 end
 local function decode(attr)
-	local ok, v = pcall(Http.JSONDecode, Http, player:GetAttribute(attr) or "")
+	local ok, v = pcall(Http.JSONDecode, Http, state:GetAttribute(attr) or "")
 	return ok and v or {}
 end
 
@@ -48,7 +50,8 @@ text("TextLabel", stages, "BATTLES", UDim2.fromScale(0.6, 0.1), UDim2.fromScale(
 local stageMsg = text("TextLabel", stages, "", UDim2.fromScale(0.94, 0.06), UDim2.fromScale(0.03, 0.13), Color3.fromRGB(255, 200, 120))
 local sx = btn(stages, "X", UDim2.fromOffset(40, 40), UDim2.new(1, -48, 0, 8), Color3.fromRGB(220, 50, 50))
 sx.MouseButton1Click:Connect(function() stages.Visible = false end)
-local stageList = Instance.new("Frame") stageList.Position = UDim2.fromScale(0.03, 0.22) stageList.Size = UDim2.fromScale(0.94, 0.75) stageList.BackgroundTransparency = 1 stageList.Parent = stages
+local stageList = Instance.new("ScrollingFrame") stageList.Position = UDim2.fromScale(0.03, 0.22) stageList.Size = UDim2.fromScale(0.94, 0.75) stageList.BackgroundTransparency = 1
+stageList.BorderSizePixel = 0 stageList.CanvasSize = UDim2.new() stageList.AutomaticCanvasSize = Enum.AutomaticSize.Y stageList.ScrollBarThickness = 8 stageList.Parent = stages
 local sll = Instance.new("UIListLayout") sll.Padding = UDim.new(0, 8) sll.Parent = stageList
 
 -- BATTLE SCREEN
@@ -97,7 +100,13 @@ local function card(parent, u, i, active)
 	bar(c, UDim2.fromOffset(6, 66), Color3.fromRGB(80, 220, 90), u.hp / u.maxHp)
 	bar(c, UDim2.fromOffset(6, 84), Color3.fromRGB(255, 200, 50), u.energy / 100)
 	local tags = {}
+	if u.boss then table.insert(tags, "👑") end
 	if u.defending then table.insert(tags, "🛡️ Defending") end
+	if u.shield > 0 then table.insert(tags, "🔰" .. u.shield) end
+	for name, left in u.status do
+		local st = B.Status[name]
+		if st and name ~= "shield" then table.insert(tags, st.icon .. left) end
+	end
 	if u.cd > 0 then table.insert(tags, u.skill .. " " .. u.cd) end
 	text("TextLabel", c, table.concat(tags, "  "), UDim2.new(1, -8, 0, 20), UDim2.fromOffset(4, 104), Color3.fromRGB(200, 200, 220))
 	if u.side == "enemy" then
@@ -143,18 +152,23 @@ end
 
 local function refreshStages()
 	for _, ch in stageList:GetChildren() do if ch:IsA("GuiObject") then ch:Destroy() end end
-	local prog = decode("BattleProgress")
+	local prog, dice = decode("BattleProgress"), decode("Dice")
+	local order = 0
 	for _, region in B.Regions do
-		local h = text("TextLabel", stageList, "🌿 " .. region.name, UDim2.new(1, 0, 0, 36), UDim2.new(), Color3.fromRGB(140, 230, 120))
+		local dieOk = not region.requiresDie or dice[region.requiresDie]
+		local h = text("TextLabel", stageList, region.icon .. " " .. region.name .. (dieOk and "" or ("  (needs the " .. Dice.ById[region.requiresDie].name .. ")")),
+			UDim2.new(1, 0, 0, 36), UDim2.new(), Color3.fromRGB(140, 230, 120))
 		h.TextXAlignment = Enum.TextXAlignment.Left
+		order += 1 h.LayoutOrder = order
 		for _, st in region.stages do
 			local prev = B.PrevStage[st.id]
-			local unlocked = not prev or prog[prev]
+			local unlocked = dieOk and (not prev or prog[prev])
 			local label = (prog[st.id] and "✅ " or (unlocked and "⚔️ " or "🔒 ")) .. st.name .. "   •   $" .. short(st.cash)
 				.. (st.firstClearGear and not prog[st.id] and ("  + " .. st.firstClearGear .. " gear") or "")
 			local b = btn(stageList, label, UDim2.new(1, 0, 0, 56), UDim2.new(), unlocked and (st.boss and Color3.fromRGB(170, 50, 50) or Color3.fromRGB(150, 90, 40)) or Color3.fromRGB(70, 70, 80))
+			order += 1 b.LayoutOrder = order
 			b.MouseButton1Click:Connect(function()
-				if not unlocked then stageMsg.Text = "Clear the previous stage first" return end
+				if not unlocked then stageMsg.Text = dieOk and "Clear the previous stage first" or ("Buy the " .. Dice.ById[region.requiresDie].name .. " first") return end
 				local ok, res = BattleAction:InvokeServer("start", st.id)
 				if not ok then stageMsg.Text = res return end
 				state, target = res, nil
@@ -165,7 +179,7 @@ local function refreshStages()
 		end
 	end
 end
-player:GetAttributeChangedSignal("BattleProgress"):Connect(function() if stages.Visible then refreshStages() end end)
+state:GetAttributeChangedSignal("BattleProgress"):Connect(function() if stages.Visible then refreshStages() end end)
 
 local function leave()
 	BattleAction:InvokeServer("leave")
