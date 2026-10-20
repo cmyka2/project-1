@@ -12,11 +12,11 @@ What *has* been run, on a Luau host outside Roblox (`tools/headless`):
 |---|---|
 | `check.luau` | Every `.luau` file under `src/` compiles (syntax only, no type check). |
 | `specs.luau` | The Studio specs in `ServerStorage/Tests` all pass: **RollSpec**, **BattleSpec** and **ProgressionSpec**. |
-| `sim.luau` | The **real** server scripts run on a mock engine (133/133 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, PlotAssigner. |
+| `sim.luau` | The **real** server scripts run on a mock engine (150/150 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, MonetizationService, PlotAssigner. |
 | `fallback.luau` | With an empty workspace, HubFallback builds every hub piece and a roll works. |
 
 The specs cover:
-- **RollSpec:** RNG normalization, die eligibility, extreme luck, invalid weights, chest luck, gear power.
+- **RollSpec:** RNG normalization, die eligibility, extreme luck, invalid weights, exact luck multipliers, biome boosts, chest luck, gear power.
 - **BattleSpec:** the damage formula, statuses, Last Stand, Mark, the healer role, boss resistance.
 - **ProgressionSpec:**
   - slot/floor formula and rebirth reset
@@ -32,6 +32,7 @@ The sim walks the §24 flow plus:
 - gear upgrades, relics, batch chests
 - team presets and arena build/cleanup
 - cosmetics and leaderboards
+- Robux shop: pass ownership, receipt dedupe, server luck, region restriction, lucky/golden/triple rolls, codes, settings
 - session lock, DataStore outage, migration, newer-schema refusal, stolen lock, shutdown
 
 The mock (`tools/headless/mockrbx.luau`) is a stand-in for the engine, not the engine itself. It does **not** model replication, real DataStore/OrderedDataStore limits or throttling, MarketplaceService, physics, rendering, ProximityPrompt range, or anything on the client. **No client UI has been executed anywhere**, mock included.
@@ -47,6 +48,9 @@ game.ServerStorage.DevGiveCash:Invoke(game.Players.<you>, 1e9)
 game.ServerStorage.DevGiveMonster:Invoke(game.Players.<you>, "frostfang|Normal", 3)
 game.ServerStorage.DevSetRebirths:Invoke(game.Players.<you>, 12)
 game.ServerStorage.DevStartEvent:Invoke("weekend_income", 600)
+game.ServerStorage.DevStartBiome:Invoke("starfall", 120)
+game.ServerStorage.DevGrantPass:Invoke(game.Players.<you>, "lucky")       -- test passes without Roblox ids
+game.ServerStorage.DevGrantProduct:Invoke(game.Players.<you>, "lucky_100") -- test products without Roblox ids
 ```
 
 Saving in Studio needs a published place with *Enable Studio Access to API Services*. Without it the HUD shows "progress is NOT saved" and the leaderboards rank only that server.
@@ -112,7 +116,9 @@ Every row is pending a Studio playtest.
 | **Security §18** | **Done.** Every remote goes through `Guard`: per-action cooldowns, token bucket, arg validation, ownership checks | `server/Guard` |
 | **Leaderboards §19** | **Done.** OrderedDataStore top 10 for earnings, rebirths, unique monsters and battle progress; falls back to this server where unavailable | `LeaderboardService`, `ExtrasUI` |
 | **Daily / quests / events §20** | **Done.** <ul><li>7-day UTC cycle (streak resets after a missed day); day 4 is a 2× luck boost</li><li>15-quest chain, 3 active, auto-completed from server counters</li><li>Events: weekend double income; Halloween 1.5× luck (2026-10-24 → 11-02) with an event recipe</li></ul> | `ProgressConfig`, `ProgressService`, `ExtrasUI` |
-| **Cosmetics / premium §3.4** | **Done (needs Roblox ids).** <ul><li>Titles over the head and aura particles</li><li>Bought with cash, earned from milestones/daily, or fixed Robux items</li><li>Robux items are never random and never gameplay; gamepass and dev-product purchases deduped by receipt</li></ul> | `ProgressService` |
+| **Cosmetics §3.4** | **Done.** <ul><li>Titles over the head and aura particles</li><li>Bought with cash, earned from milestones/daily/VIP, or a fixed Robux supporter aura</li></ul> | `ProgressService` |
+| **Robux shop (added on request)** | **Done (needs Roblox ids).** <ul><li>Gamepasses: Lucky 2x, Super Lucky 3x, VIP, Quick Roll, Auto Roll, Triple Roll, Huge Backpack</li><li>Products: 10/100/1000 Lucky Rolls (10x luck each), Luck Potion, Server Luck</li><li>One ProcessReceipt; the receipt is saved before PurchaseGranted, so a purchase is never granted twice</li><li>Odds shown before purchase; paid luck blocked where Roblox restricts paid random items</li><li>Clover icons ready to upload</li></ul> This deliberately changes spec §3.4 ("never randomized paid rewards"); see `docs/RESEARCH.md`. | `MonetizationConfig`, `MonetizationService`, `ShopUI`, `assets/shop-icons` |
+| **Genre mechanics (from research)** | **Done.** <ul><li>Golden roll every 10th, Rainbow every 100th</li><li>8 biomes boosting one element's odds, with world tint and timers</li><li>Codes</li><li>Cross-server Secret+ announcements</li><li>Premium x1.1 luck</li><li>Roll FX: spinner, flash, shake, cutscene, skip setting</li><li>Floating tags over placed monsters</li></ul> See `docs/RESEARCH.md` for what was taken from which games. | `MonsterService`, `ProgressService`, `RollFX`, `HudUI` |
 | **Asset registry §4** | **Done.** Used for monsters, shops, statue, arenas, enemies, bosses and aura particles | `AssetRegistry` |
 | **World §3** | **Kept.** The Studio hub is found at runtime; HubFallback adds labeled placeholders for anything missing, including DailyRewards, Leaderboard and CosmeticShop | `HubFallback` |
 
@@ -121,7 +127,10 @@ Every row is pending a Studio playtest.
 - **Battle modes beyond story + regional bosses:** Endless Tower, Daily Challenges, Element Trials, Survival, co-op raids, PvP. The spec says to prioritize story and bosses; the engine takes any enemy list, so these are content plus a mode selector.
 - **Reserve monsters / switching in battle.** The spec only asks for this "once reserves are introduced".
 - **Converting duplicates into research materials.** Listed as optional ("may").
-- **Robux ids.** `title_vip.gamepass` and `aura_supporter.product` in `ProgressConfig` are `nil` until you create the gamepass and product on Roblox. The UI shows "Coming soon".
+- **Robux ids.** Every `gamepass` / `product` in `MonetizationConfig`, plus `aura_supporter.product` in `ProgressConfig`, is `nil` until you create it on the Creator Dashboard. Until then the UI shows "Coming soon". Steps:
+  1. Upload `assets/shop-icons/<id>.png` as each item's image.
+  2. Paste the ids into the config, and paste each image id into `image` for in-game icons.
+- **Pity counters.** Not added (see `docs/RESEARCH.md`).
 - **Battle visuals.** Arenas and units are static placeholders; turns don't play attack animations yet.
 - **Balance.** Every number is a placeholder: costs, curves, regions 3–9 stats (×2.5 per region), rewards.
 
@@ -130,7 +139,7 @@ Every row is pending a Studio playtest.
 1. **Hub names match.** Code expects:
    - `Workspace.Hub.Plots.Plot<N>`: attributes `PlotId`, `Owner = ""`, `Color`; children `Base`, `OwnerSign`, `SpawnPoint`, `Slot1..10` (attribute `SlotIndex`), `Collect1..10`.
    - `Workspace.Hub.Shops.SummonArea.SummonCore`, which has a ProximityPrompt.
-   - Prompts under models named `DiceShop`, `ChestShop`, `UpgradeTree`, `RebirthAltar`, `Index`, `DailyRewards`, `Leaderboard` and `CosmeticShop`.
+   - Prompts under models named `DiceShop`, `ChestShop`, `UpgradeTree`, `RebirthAltar`, `Index`, `DailyRewards`, `Leaderboard` and `CosmeticShop`. The Robux shop opens from the 🍀 SHOP button, not a building.
    
    Missing pieces become magenta "PLACEHOLDER" stand-ins, and Output says so.
 2. **Private State replication.** The server creates `PlayerGui.State` (ScreenGui, `ResetOnSpawn = false`) and every client UI waits for it. Check that it:
@@ -152,7 +161,13 @@ Every row is pending a Studio playtest.
 7. **ActionUI dash** (LinearVelocity) feels right and can't push you through walls more than normal movement can.
 8. **Leaderboards** populate after about 2 min in a live server.
 9. **Cosmetics**: a title shows over the head; an aura emits.
-10. **Attribute sizes** with a full backpack (≈30 KB `Monsters` JSON). **HUD overlap** on small screens: the left button stack (BAG to TREE), the top-left row and the right action column.
+10. **Robux shop.**
+    - With real ids: test purchases in Studio; the receipt is granted once, and a rejoin still has the Lucky Rolls.
+    - Odds panel numbers match the Index.
+    - `PolicyService` restriction behaves as expected on a test account.
+11. **RollFX.** Spinner, flash, shake and the Divine+ cutscene (`DevGiveMonster` won't trigger it; roll with `DevGrantProduct lucky_1000`). The skip setting works.
+12. **Biomes.** `DevStartBiome`: tint, timer, announcement, Index odds change.
+13. **Attribute sizes** with a full backpack (≈30 KB `Monsters` JSON). **HUD overlap** on small screens: the left button stack (BAG to TREE), the top-left row and the right action column.
 
 ## Model assets the code asks for (registry ids)
 
@@ -201,4 +216,8 @@ Drop a `Model` named with the id into `ReplicatedStorage.Assets.<Category>`, or 
 
 They replace the generated placeholder decks.
 
-**Not referenced by code yet:** the Dice, Bases, Chests, Weapons, Armor, Accessories, Relics, Icons, Sounds, Animations and Portals categories. Those items are drawn as UI swatches or emoji today.
+**Sounds** (`Assets.Sounds`): `roll_tick`, `roll_reveal`, `roll_rare` (Sound instances). Until imported, a built-in ping plays.
+
+**Shop icons:** 12 generated PNGs in `assets/shop-icons`, regenerated by `tools/icons/make_shop_icons.py`. Upload them as gamepass/product images, then put the image ids in `MonetizationConfig.image`.
+
+**Not referenced by code yet:** the Dice, Bases, Chests, Weapons, Armor, Accessories, Relics, Icons, Animations and Portals categories. Those items are drawn as UI swatches or emoji today.
