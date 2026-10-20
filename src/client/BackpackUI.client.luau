@@ -46,7 +46,7 @@ panel.BackgroundColor3 = Color3.fromRGB(30, 36, 44) panel.Visible = false panel.
 local lim = Instance.new("UISizeConstraint") lim.MaxSize = Vector2.new(1040, 720) lim.Parent = panel
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 18)
 Instance.new("UIStroke", panel).Thickness = 4
-local title = text("TextLabel", panel, "BACKPACK", UDim2.fromScale(0.4, 0.07), UDim2.fromScale(0.02, 0.015))
+local title = text("TextLabel", panel, "BACKPACK", UDim2.fromScale(0.2, 0.07), UDim2.fromScale(0.02, 0.015))
 title.TextXAlignment = Enum.TextXAlignment.Left
 local msg = text("TextLabel", panel, "", UDim2.fromScale(0.5, 0.05), UDim2.fromScale(0.44, 0.025), Color3.fromRGB(255, 220, 120))
 local close = btn(panel, "X", UDim2.fromOffset(40, 40), UDim2.new(1, -48, 0, 8), Color3.fromRGB(220, 50, 50))
@@ -64,10 +64,16 @@ local SORTS = {
 	{ "Newest", function(a, b) return (a.m.t or 0) > (b.m.t or 0) end },
 	{ "Rarity", function(a, b) return Config.Tier[Config.ById[a.m.id].rarity] > Config.Tier[Config.ById[b.m.id].rarity] end },
 }
-local sortI, filterI = 1, 0 -- filterI 0 = all rarities
+local sortI, filterI, elemI, roleI = 1, 0, 0, 0 -- 0 = all
+local ELEMENTS = { "Nature", "Earth", "Fire", "Water", "Lightning", "Light", "Shadow", "Cosmic" }
+local ROLES = { "Attacker", "Tank", "Healer", "Support", "Controller", "Specialist" }
+local multi, picked = false, {} -- multi-select mode for selling several at once
 local sortB = btn(panel, "", UDim2.fromScale(0.15, 0.06), UDim2.fromScale(0.3, 0.1), Color3.fromRGB(70, 90, 150))
 local filterB = btn(panel, "", UDim2.fromScale(0.15, 0.06), UDim2.fromScale(0.465, 0.1), Color3.fromRGB(70, 90, 150))
-local countL = text("TextLabel", panel, "", UDim2.fromScale(0.3, 0.05), UDim2.fromScale(0.64, 0.105), Color3.fromRGB(200, 200, 210))
+local countL = text("TextLabel", panel, "", UDim2.fromScale(0.2, 0.04), UDim2.fromScale(0.22, 0.03), Color3.fromRGB(200, 200, 210))
+local elemB = btn(panel, "", UDim2.fromScale(0.12, 0.06), UDim2.fromScale(0.63, 0.1), Color3.fromRGB(70, 90, 150))
+local roleB = btn(panel, "", UDim2.fromScale(0.12, 0.06), UDim2.fromScale(0.755, 0.1), Color3.fromRGB(70, 90, 150))
+local multiB = btn(panel, "Select", UDim2.fromScale(0.1, 0.06), UDim2.fromScale(0.88, 0.1), Color3.fromRGB(120, 90, 50))
 local grid = Instance.new("ScrollingFrame") grid.Position = UDim2.fromScale(0.02, 0.19) grid.Size = UDim2.fromScale(0.6, 0.79)
 grid.BackgroundTransparency = 1 grid.BorderSizePixel = 0 grid.CanvasSize = UDim2.new() grid.AutomaticCanvasSize = Enum.AutomaticSize.Y grid.ScrollBarThickness = 8 grid.Parent = panel
 local gl = Instance.new("UIGridLayout") gl.CellSize = UDim2.fromOffset(132, 92) gl.CellPadding = UDim2.fromOffset(8, 8)
@@ -96,7 +102,9 @@ local function refreshGrid()
 	for iid, m in mons do
 		total += 1
 		local def = Config.ById[m.id]
-		if def and (q == "" or nameOf(m):lower():find(q, 1, true)) and (not rar or def.rarity == rar.id) then
+		local el, ro = ELEMENTS[elemI], ROLES[roleI]
+		if def and (q == "" or nameOf(m):lower():find(q, 1, true)) and (not rar or def.rarity == rar.id)
+			and (not el or def.element == el) and (not ro or Config.RoleByElement[def.element] == ro) then
 			table.insert(items, { iid = iid, m = m, def = def })
 		end
 	end
@@ -108,20 +116,30 @@ local function refreshGrid()
 	sortB.Text = "Sort: " .. SORTS[sortI][1]
 	filterB.Text = rar and rar.id or "All rarities"
 	countL.Text = total .. " / " .. (state:GetAttribute("Capacity") or 100) .. " monsters"
+	elemB.Text = ELEMENTS[elemI] or "All elements"
+	roleB.Text = ROLES[roleI] or "All roles"
+	local n = 0 for iid in picked do if mons[iid] then n += 1 else picked[iid] = nil end end
+	multiB.Text = multi and ("Sell " .. n) or "Select"
 	for i, it in items do
 		if i > 300 then break end -- keep the grid light; search narrows it
 		local rc = Config.RarityById[it.def.rarity]
 		local b = btn(grid, "", UDim2.new(), UDim2.new(), Color3.fromRGB(48, 54, 72))
 		b.LayoutOrder = i
 		local st = b:FindFirstChildOfClass("UIStroke")
-		st.Color = it.iid == selected and Color3.new(1, 1, 1) or rc.color
-		st.Thickness = it.iid == selected and 5 or 3
+		local hi = multi and picked[it.iid] or (not multi and it.iid == selected)
+		st.Color = hi and Color3.new(1, 1, 1) or rc.color
+		st.Thickness = hi and 5 or 3
 		text("TextLabel", b, nameOf(it.m), UDim2.new(1, -8, 0.32, 0), UDim2.fromOffset(4, 4), rc.color)
 		text("TextLabel", b, "Lv " .. it.m.lvl .. (it.m.fr > 0 and ("  ★" .. it.m.fr) or ""), UDim2.new(1, -8, 0.22, 0), UDim2.new(0, 4, 0.36, 0))
 		text("TextLabel", b, "$" .. short(it.m.inc) .. "/s", UDim2.new(1, -8, 0.2, 0), UDim2.new(0, 4, 0.58, 0), Color3.fromRGB(120, 255, 120))
 		local tags = (it.m.lock and "🔒" or "") .. (it.m.fav and "⭐" or "") .. (onBase[it.iid] and "🏠" or "") .. (table.find(team, it.iid) and "⚔️" or "")
 		text("TextLabel", b, tags, UDim2.new(1, -8, 0.18, 0), UDim2.new(0, 4, 0.8, 0))
 		b.MouseButton1Click:Connect(function()
+			if multi then
+				picked[it.iid] = not picked[it.iid] or nil
+				refreshGrid()
+				return
+			end
 			selected, pendingSell = it.iid, nil
 			msg.Text = ""
 			refreshGrid()
@@ -155,7 +173,8 @@ refreshDetail = function()
 	local slot
 	for sk, iid in placed do if iid == selected then slot = sk end end
 	line(nameOf(m), rc.color, 32)
-	line(def.rarity .. " • " .. def.element .. (slot and ("  •  on slot " .. slot) or ""), rc.color)
+	line(def.rarity .. " • " .. def.element .. " • " .. (m.role or "") .. (slot and ("  •  on slot " .. slot) or ""), rc.color)
+	line(Config.Lore[m.id] or "", Color3.fromRGB(190, 190, 210), 18)
 	line("Level " .. m.lvl .. " / " .. F.MAX_LEVEL .. "   Fusion ★" .. m.fr .. " / " .. F.MAX_FUSION)
 	line("Income $" .. short(m.inc) .. "/s" .. (m.nxt and ("  →  $" .. short(m.nxt) .. "/s") or ""), Color3.fromRGB(120, 255, 120))
 	line(("HP %s   DMG %s   SPD %s"):format(short(m.hp or 0), short(m.dmg or 0), tostring(m.spd or 0)), Color3.fromRGB(255, 200, 200))
@@ -219,6 +238,27 @@ end
 
 sortB.MouseButton1Click:Connect(function() sortI = sortI % #SORTS + 1 refreshGrid() end)
 filterB.MouseButton1Click:Connect(function() filterI = (filterI + 1) % (#Config.Rarities + 1) refreshGrid() end)
+elemB.MouseButton1Click:Connect(function() elemI = (elemI + 1) % (#ELEMENTS + 1) refreshGrid() end)
+roleB.MouseButton1Click:Connect(function() roleI = (roleI + 1) % (#ROLES + 1) refreshGrid() end)
+-- first tap enters select mode; with picks, tap sells them (locked/placed ones are refused by the server)
+local confirmMulti = false
+multiB.MouseButton1Click:Connect(function()
+	local ids = {}
+	for iid in picked do table.insert(ids, iid) end
+	if not multi or #ids == 0 then
+		multi = not multi
+		table.clear(picked)
+		msg.Text = multi and "Tap monsters to pick them, then tap Sell" or ""
+		refreshGrid()
+		return
+	end
+	local ok, res, flag = Inv:InvokeServer("sell", ids, confirmMulti)
+	if not ok and flag == "confirm" then confirmMulti = true say(false, res .. " Tap Sell again to confirm.") return end
+	confirmMulti = false
+	if ok then multi = false table.clear(picked) end
+	say(ok, res, ok and ("Sold " .. #ids .. " for $" .. short(res)) or nil)
+	refreshGrid()
+end)
 search:GetPropertyChangedSignal("Text"):Connect(function() if panel.Visible then refreshGrid() end end)
 for _, a in { "Monsters", "Placed", "Team", "Gear" } do
 	state:GetAttributeChangedSignal(a):Connect(function()

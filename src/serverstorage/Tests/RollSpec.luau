@@ -52,6 +52,13 @@ return function()
 		assert(math.abs(s - 1) < 1e-9, c.id .. " odds must sum to 1")
 		for _ = 1, 2000 do local r, t = G.roll(c, rng) assert(c.weights[r] and G.TypeById[t], c.id .. " rolled " .. tostring(r)) end
 	end
+	-- chest luck shifts drops toward rarer gear and stays normalized; gear levels scale power
+	local wood = G.ChestById.wooden
+	local base, lucky = G.odds(wood), G.odds(wood, 0.75)
+	local ls = 0 for _, p in lucky do ls += p end
+	assert(math.abs(ls - 1) < 1e-9 and lucky.Rare > base.Rare and lucky.Common < base.Common, "chest luck")
+	assert(math.abs(G.power({ r = "Rare", lvl = 3 }) - G.RarityById.Rare.income * 1.2) < 1e-9, "gear level power")
+	for _ = 1, 500 do assert(G.randomType(rng, false) ~= "relic", "relics only from relic chests") end
 	return ("roll ok: common %.3f (exp %.3f), huge %.4f, monstrous %.4f, luck20 rare+ %.3f (exp %.3f)"):format(
 		common / n, C.Odds.Common, huge / n, monstrous / n, lucky1 / 50000, expect)
 end

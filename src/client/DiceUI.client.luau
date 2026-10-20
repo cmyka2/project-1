@@ -5,6 +5,7 @@ local PPS = game:GetService("ProximityPromptService")
 local Http = game:GetService("HttpService")
 local Config = require(RS:WaitForChild("Monster"):WaitForChild("MonsterConfig"))
 local Dice = require(RS.Monster:WaitForChild("DiceConfig"))
+local Luck = require(RS.Monster:WaitForChild("LuckConfig"))
 local DiceAction = RS.Monster:WaitForChild("DiceAction")
 local player = Players.LocalPlayer
 local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
@@ -57,12 +58,13 @@ for i, die in Dice.List do
 	end
 	local cap = Config.Rarities[die.maxTier].id
 	text("TextLabel", row, die.name, UDim2.new(0.5, -80, 0, 32), UDim2.fromOffset(74, 6), die.color).TextXAlignment = Enum.TextXAlignment.Left
-	text("TextLabel", row, "Luck x" .. die.luck .. "  •  up to " .. cap, UDim2.new(0.5, -80, 0, 24), UDim2.fromOffset(74, 40), Config.RarityById[cap].color).TextXAlignment = Enum.TextXAlignment.Left
+	local luckL = text("TextLabel", row, "", UDim2.new(0.55, -80, 0, 24), UDim2.fromOffset(74, 40), Config.RarityById[cap].color)
+	luckL.TextXAlignment = Enum.TextXAlignment.Left
 	local b = text("TextButton", row, "", UDim2.new(0.3, 0, 0, 50), UDim2.new(0.68, 0, 0, 11))
 	b.BackgroundTransparency = 0
 	Instance.new("UICorner", b)
 	local bs = Instance.new("UIStroke", b) bs.Thickness = 3 bs.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	rows[die.id] = { button = b, die = die }
+	rows[die.id] = { button = b, die = die, luck = luckL, cap = cap }
 	b.MouseButton1Click:Connect(function()
 		local owned = decode("Dice")
 		local ok, err = DiceAction:InvokeServer(owned[die.id] and "equip" or "buy", die.id)
@@ -74,9 +76,13 @@ local function refresh()
 	local owned, sel, cash = decode("Dice"), state:GetAttribute("SelectedDie"), state:GetAttribute("Cash") or 0
 	local cur = Dice.ById[sel or "grassland"] or Dice.List[1]
 	hud.Text = "🎲 " .. cur.name .. "  •  Luck x" .. ("%.2f"):format(state:GetAttribute("Luck") or 1):gsub("%.?0+$", "")
+	local add = state:GetAttribute("LuckAdd") or 0
 	for i, r in rows do
 		local die, b = r.die, r.button
+		-- effective luck with your permanent bonuses (diminishing returns applied), and the rarest tier it can roll
+		r.luck.Text = ("Luck x%s (base x%s)  •  up to %s"):format(("%.2f"):format(Luck.combine(die.luck, add)):gsub("%.?0+$", ""), die.luck, r.cap)
 		local prev = Dice.List[Dice.Index[die.id] - 1]
+		if prev and not owned[prev.id] then r.luck.Text ..= "  •  needs " .. prev.name end
 		if die.id == sel then
 			b.Text, b.BackgroundColor3 = "Equipped", Color3.fromRGB(90, 95, 110)
 		elseif owned[die.id] then
@@ -89,7 +95,7 @@ local function refresh()
 		end
 	end
 end
-for _, a in { "Dice", "SelectedDie", "Luck" } do state:GetAttributeChangedSignal(a):Connect(refresh) end
+for _, a in { "Dice", "SelectedDie", "Luck", "LuckAdd" } do state:GetAttributeChangedSignal(a):Connect(refresh) end
 state:GetAttributeChangedSignal("Cash"):Connect(function() if panel.Visible then refresh() end end)
 PPS.PromptTriggered:Connect(function(prompt)
 	if prompt:FindFirstAncestor("DiceShop") then msg.Text = "" refresh() panel.Visible = true end

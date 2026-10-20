@@ -11,11 +11,30 @@ What *has* been run, on a Luau host outside Roblox (`tools/headless`):
 | Check | What it covers |
 |---|---|
 | `check.luau` | Every `.luau` file under `src/` compiles (syntax only, no type check). |
-| `specs.luau` | The Studio specs in `ServerStorage/Tests` (RollSpec, BattleSpec, ProgressionSpec), all passing. |
-| `sim.luau` | The **real** server scripts (DataService, Game, Guard, MonsterService, ChestService, BattleService, PlotAssigner) running on a mock engine, walking the §24 flow plus lock, outage, migration and shutdown cases. 96/96 checks pass. |
-| `fallback.luau` | An empty workspace: HubFallback builds the island, 8 plots, the shops and the summon station, and a roll works. |
+| `specs.luau` | The Studio specs in `ServerStorage/Tests` all pass: **RollSpec**, **BattleSpec** and **ProgressionSpec**. |
+| `sim.luau` | The **real** server scripts run on a mock engine (133/133 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, PlotAssigner. |
+| `fallback.luau` | With an empty workspace, HubFallback builds every hub piece and a roll works. |
 
-The mock (`tools/headless/mockrbx.luau`) is a stand-in for the engine, not the engine itself. It does **not** model replication, real DataStore limits or throttling, physics, rendering, ProximityPrompt range, or anything on the client. **No client UI has been executed anywhere**, mock included. "Mock-verified" below means server logic only.
+The specs cover:
+- **RollSpec:** RNG normalization, die eligibility, extreme luck, invalid weights, chest luck, gear power.
+- **BattleSpec:** the damage formula, statuses, Last Stand, Mark, the healer role, boss resistance.
+- **ProgressionSpec:**
+  - slot/floor formula and rebirth reset
+  - v1→v3 migration and old-tree refund
+  - session-lock rules
+  - Evolution Tree ranks, prerequisites, rebirth gates
+  - Ascension costs
+  - the daily cycle and event windows
+
+The sim walks the §24 flow plus:
+- ranked skill nodes, Ascension, respec
+- quests, milestones, daily streak, events and boosts
+- gear upgrades, relics, batch chests
+- team presets and arena build/cleanup
+- cosmetics and leaderboards
+- session lock, DataStore outage, migration, newer-schema refusal, stolen lock, shutdown
+
+The mock (`tools/headless/mockrbx.luau`) is a stand-in for the engine, not the engine itself. It does **not** model replication, real DataStore/OrderedDataStore limits or throttling, MarketplaceService, physics, rendering, ProximityPrompt range, or anything on the client. **No client UI has been executed anywhere**, mock included.
 
 ### Run it
 
@@ -24,12 +43,13 @@ Studio (after Rojo sync), in the server command bar:
 ```lua
 print(require(game.ServerStorage.Tests.RunAll)())
 -- Studio-only QA hooks:
-game.ServerStorage.DevGiveCash:Invoke(game.Players.<you>, 1e6)
+game.ServerStorage.DevGiveCash:Invoke(game.Players.<you>, 1e9)
 game.ServerStorage.DevGiveMonster:Invoke(game.Players.<you>, "frostfang|Normal", 3)
 game.ServerStorage.DevSetRebirths:Invoke(game.Players.<you>, 12)
+game.ServerStorage.DevStartEvent:Invoke("weekend_income", 600)
 ```
 
-Saving in Studio needs a published place with *Enable Studio Access to API Services*. Without it the HUD shows "progress is NOT saved", which is expected.
+Saving in Studio needs a published place with *Enable Studio Access to API Services*. Without it the HUD shows "progress is NOT saved" and the leaderboards rank only that server.
 
 Headless (Rust toolchain plus a C++ compiler, run from the repo root):
 
@@ -45,106 +65,100 @@ $B tools/headless/fallback.luau
 ## Acceptance criteria (spec §24)
 
 Status values:
-- **Implemented**: code is complete and the server path passes in the mock sim.
+- **Implemented**: the server path passes in the mock sim.
 - **Pending playtest**: needs a Studio run before it can be called tested.
 
 Every row is pending a Studio playtest.
 
-| # | Criterion | Status | Server evidence (mock sim) | Pending playtest / gaps |
+| # | Criterion | Status | Server evidence (mock sim) | Pending playtest |
 |---|---|---|---|---|
-| 1 | New player gets a valid saved profile | Implemented | Profile written with session lock; `DataStatus` goes `loading` → `ready` | Real DataStore in a published place |
-| 2 | Assigned an available plot | Implemented | Separate plots for two players; third player gets `PlotStatus = "full"`, then the next plot that frees up | Real `Workspace.Hub.Plots`, teleport to `SpawnPoint` |
-| 3 | Starts with the Grassland Die | Implemented | `Dice.grassland` and `SelectedDie` on a new profile | DiceUI shows "Equipped" |
-| 4 | Rolls a server-generated monster | Implemented | Summon prompt → weighted roll on the server; roll cooldown enforced | Prompt at the real SummonCore, roll toast |
-| 5 | Monster in backpack + collection | Implemented | Instance created, `Index.D` updated, `LastRoll` published | BackpackUI and IndexUI render it |
-| 6 | Places it in a base slot | Implemented | Placement by instance id; double placement and locked slot rejected; model on pedestal | BaseUI prompt + picker on the real plot |
-| 7 | Monster generates money | Implemented | 10 s of income matches the per-second rate | Pad `$x/s` labels, HUD cash/s |
-| 8 | Upgrades the monster | Implemented | `InventoryAction upgrade`: level 2, cost charged; forged id rejected | BackpackUI upgrade button |
-| 9 | Income increases correctly | Implemented | Income × `levelMult(2)` exactly | — |
-| 10 | Buys a new die | Implemented | Buy charges once; can't skip a tier; can't equip unowned | DiceUI |
-| 11 | Equips it and rolls again | Implemented | Forest die selected, second roll uses its pool | — |
-| 12 | Buys an Evolution Tree node | Implemented | `money1` bought; prerequisites enforced; no re-buy | SkillTreeUI (the existing hex tree) |
-| 13 | Bonus applies exactly once | Implemented | Income × 1.25 exactly, server value and published value | — |
-| 14 | Buys a chest, gets server gear | Implemented | Wooden chest → gear; bad batch size and missing die rejected | ChestUI result text |
-| 15 | Equips gear, stats change | Implemented | Income × (1 + bonus); weapon/armor/accessory stat goes up | ChestUI GEAR bag, Backpack detail |
-| 16 | Builds a legal battle team | Implemented | Owned, distinct, ≤ 3; duplicates and unowned rejected | Backpack "Add to battle team" |
-| 17 | Enters a battle, picks turn-based actions | Implemented | Battle start, attack loop, server-side turn checks | BattleUI cards, status icons, buttons |
-| 18 | Wins and gets the right rewards | Implemented | Cash + materials + progress paid once; acting after the end pays nothing | Victory panel text |
-| 19 | Meets rebirth requirements | Implemented | Cost, plus a boss gate (`grass3`) from rebirth 3 | RebirthUI requirement lines |
-| 20 | Confirms rebirth, gets permanent rewards | Implemented | Cash reset; monsters, gear and placement kept; AP awarded | RebirthUI confirm |
-| 21 | +1 slot and floor milestones | Implemented | Rebirth 6 → 11 slots, `Floor2` generated with slot 11, placing there works | Placeholder floor geometry, elevator prompts and teleport |
-| 22 | Leaves and rejoins | Implemented | Lock released on leave, `LastOnline` stamped; offline earnings for 2 h, capped at 8 h | Real join/leave timing |
-| 23 | Everything loads correctly | Implemented | Monsters, placements, gear (on its monster), rebirths and cash restored after a JSON round-trip | — |
-| 24 | Others can't touch your data/base | Implemented | Other player can't place, equip or sell your things; State is per player in their own PlayerGui | Confirm the State ScreenGui replicates only to its owner |
+| 1 | New player gets a valid saved profile | Implemented | Profile written with session lock; `DataStatus` goes `loading` → `ready` | Published-place DataStore |
+| 2 | Assigned an available plot | Implemented | Separate plots; third player gets `PlotStatus = "full"`, then the next plot that frees up | Real `Workspace.Hub.Plots` |
+| 3 | Starts with the Grassland Die | Implemented | New profile | DiceUI |
+| 4 | Rolls a server-generated monster | Implemented | Prompt roll, cooldown; ROLL button only near the station | Prompt, toast, ROLL button |
+| 5 | In backpack + collection | Implemented | Instance + discovery + `LastRoll` | BackpackUI, IndexUI |
+| 6 | Places it in a slot | Implemented | Placement by instance id, all rejections | BaseUI on the real plot |
+| 7 | Generates money | Implemented | 10 s of income matches the rate | Pad labels, HUD |
+| 8–9 | Upgrades it, income rises correctly | Implemented | × `levelMult(2)` exactly | Backpack upgrade |
+| 10–11 | Buys a die, equips it, rolls again | Implemented | Charges once; tiers can't be skipped | DiceUI |
+| 12–13 | Buys an Evolution Tree node (cash); the bonus applies exactly once | Implemented | Coin Collector rank 1 → ×1.1, rank 2 → ×1.2 (server value and published value) | SkillTreeUI |
+| 14–15 | Buys a chest, equips the gear, stats change | Implemented | Income × (1 + power); stat raised | ChestUI |
+| 16 | Legal battle team | Implemented | Owned, distinct, ≤ 3; presets | Backpack / BattleUI |
+| 17–18 | Turn-based battle, correct rewards once | Implemented | Win → cash + materials + progress, single payout; arena built and removed | BattleUI over the 3D arena |
+| 19–21 | Rebirth requirements, permanent rewards, slot + floor | Implemented | Cash reset, everything else kept, AP, 11 slots and Floor2 at rebirth 6 | RebirthUI, floor geometry, elevator |
+| 22–23 | Leave/rejoin restores everything | Implemented | Lock released; offline earnings (8 h + skill/ascension cap); all data restored after a JSON round-trip | Real join timing |
+| 24 | Others can't touch your data or base | Implemented | Cross-player place/equip/sell rejected; State is per player | State replicates only to its owner |
 
-Also mock-verified:
-- Lock held by another live server → join kicked, save untouched.
-- Expired lock is taken over.
-- DataStore outage on load → kick, never overwrite with defaults.
-- v1 save migrated on load.
-- Newer schema refused.
-- Lock stolen mid-session → this server stops writing and removes the player.
-- BindToClose saves and releases.
-- Remote spam rate-limited.
-- NaN, fractional and table arguments rejected.
-- Fusion validation: same copy twice, target as material, locked copy.
-- Last-copy sell confirmation.
-- Codex keeps a sold monster.
+## System map
 
-## System map (what existed → what it is now)
+| System (spec §) | Status | Where |
+|---|---|---|
+| **Persistence §5** | **Done.** <ul><li>UpdateAsync only, session lock (heartbeat, 5 min expiry), retries</li><li>Schema v3, migrations v1→v2→v3 (the old tree is refunded in cash)</li><li>Autosave, debounced saves after purchases, release on leave, BindToClose</li><li>Kick instead of defaults when loading fails</li></ul> | `server/DataService`, `server/DataSchema` |
+| **Economy §5.3 / §10** | **Done.** <ul><li>`Game.addCash` / `Game.spend` are the only cash writers</li><li>One income loop</li><li>Offline earnings from server timestamps, 8 h cap, extended by Idle Earnings and Timeless Rest</li><li>Event and boost multipliers never apply offline</li></ul> | `server/Game`, `MonsterService` |
+| **RNG + luck §6** | **Done.** <ul><li>Normalized weighted pool with per-die eligibility</li><li>Luck = die × boosts × (1 + skill + ascension + milestone + 2% per rebirth), diminishing past 25</li><li>Double Fortune bonus rolls; Discovery Streak cash</li><li>Server-wide announcements for Mythic+ or Monstrous rolls</li><li>Auto-roll (Auto Pickup node) and the ROLL button both go through the same server roll</li></ul> | `Weighted`, `LuckConfig`, `MonsterConfig`, `MonsterService` |
+| **Monsters §6** | **Done.** <ul><li>36 monsters with role (by element), lore and element</li><li>Glitched monsters only from the Glitch die</li></ul> | `MonsterConfig` |
+| **Inventory / Codex §8** | **Done.** <ul><li>Instances with ids</li><li>Search; sort by income, level, power, newest, rarity; filters by rarity, element, role; favorites first</li><li>Lock, multi-select sell, sell duplicates, last-copy confirmation</li><li>Fusion (3 copies; 2 with Quick Fusion)</li><li>The Codex keeps sold monsters; lore and role on hover</li><li>Collection milestones: 10/25/50/100 unique, plus full rarity sets with auras</li></ul> | `BackpackUI`, `IndexUI`, `ProgressService` |
+| **Base, floors §9 / §3.3** | **Done.** Slots = 5 + r, floors = min(3, 1 + r // 6). Generated placeholder Floor2/Floor3 with elevators unless Studio provides them | `Formulas`, `MonsterService`, `BaseUI` |
+| **Upgrades §11** | **Done.** Cost curve, discounted by Efficient Training; server-computed previews | `Formulas`, `Game` |
+| **Dice §7** | **Done.** <ul><li>Buy once, equip</li><li>The shop shows each die's effective luck with your bonuses, its rarity cap and its unlock requirement</li></ul> | `DiceUI` |
+| **Evolution Tree §12 (cash)** | **Done.** <ul><li>The spec's six branches, 7 nodes each, all names as listed</li><li>5 cross-branch nodes: Fortune Engine, War Beast, Explorer's Instinct, Master Collector, Divine Ascension (needs all six branches)</li><li>Multiple ranks with rising **cash** costs; multi-prerequisites; rebirth gates</li><li>Every effect is live through `Game.stat`</li><li>UI: hex branches joined by lines, locked/available/owned/maxed states, rank and price, tap to inspect then tap to buy, search, respec (75% refund, confirmed)</li></ul> | `SkillTree`, `SkillTreeUI`, `MonsterService` BuySkill |
+| **Rebirth / Ascension §13** | **Done.** <ul><li>Requirement table (cost, plus boss gate from rebirth 3)</li><li>Explicit reset policy</li><li>Permanent +10% income and +2% luck per rebirth</li><li>AP (1 per rebirth, 6 on floor milestones)</li><li>**Ascension Tree:** 6 permanent nodes bought with AP; respec doesn't touch them</li></ul> | `RebirthConfig`, `SkillTreeUI` Ascension panel |
+| **Chests / gear §14** | **Done.** <ul><li>Batch opens (1 or 10); chest discount and chest luck from the tree</li><li>Gear levels 1–10 (+10% power each), random secondary stat (income, crit or energy)</li><li>Relics: 4th slot, unlocked by Equipment Slots; from Divine/Cosmic chests or crafting</li></ul> | `GearConfig`, `ChestService`, `ChestUI` |
+| **Crafting §14.6** | **Done.** 6 recipes, including an event-only one; materials from every region | `GearConfig.Recipes` |
+| **Battle §15** | **Done.** <ul><li>Roles (stat profiles + Healer/Support/Controller/Specialist traits)</li><li>All 10 spec statuses: burn, poison, freeze, stun, weaken, expose, shield, regen + cleanse, mark</li><li>Control immunity, longer for bosses</li><li>Skill-tree combat mods: crit, elemental, energy, boss, skill/ult amp, regen, Last Stand, protect, resist, guard</li><li>Team presets; all 9 regions (27 stages) with the spec's bosses</li><li>Per-battle isolated placeholder 3D arena</li></ul> | `BattleEngine`, `BattleConfig`, `BattleService`, `BattleUI` |
+| **Regions §16** | **Done.** 9 regions, unlocked by previous boss + owning that region's die; materials per region | `BattleConfig` |
+| **HUD / UI §17** | **Done.** <ul><li>Cash, cash/s, region, quest tracker, events, notices, announcements</li><li>BAG, INDEX, GEAR, BATTLE and TREE buttons; DAILY, RANKS and STYLE buttons; ROLL, AUTO, DASH and TRAVEL buttons</li></ul> | client scripts |
+| **Mobility nodes** | **Done.** <ul><li>Walk speed and jump power set on the server</li><li>Dash (Q or button) runs on the client; distance and cooldown come from the tree</li><li>Portal Mastery fast travel is validated on the server</li></ul> | `ActionUI`, `ProgressService` |
+| **Security §18** | **Done.** Every remote goes through `Guard`: per-action cooldowns, token bucket, arg validation, ownership checks | `server/Guard` |
+| **Leaderboards §19** | **Done.** OrderedDataStore top 10 for earnings, rebirths, unique monsters and battle progress; falls back to this server where unavailable | `LeaderboardService`, `ExtrasUI` |
+| **Daily / quests / events §20** | **Done.** <ul><li>7-day UTC cycle (streak resets after a missed day); day 4 is a 2× luck boost</li><li>15-quest chain, 3 active, auto-completed from server counters</li><li>Events: weekend double income; Halloween 1.5× luck (2026-10-24 → 11-02) with an event recipe</li></ul> | `ProgressConfig`, `ProgressService`, `ExtrasUI` |
+| **Cosmetics / premium §3.4** | **Done (needs Roblox ids).** <ul><li>Titles over the head and aura particles</li><li>Bought with cash, earned from milestones/daily, or fixed Robux items</li><li>Robux items are never random and never gameplay; gamepass and dev-product purchases deduped by receipt</li></ul> | `ProgressService` |
+| **Asset registry §4** | **Done.** Used for monsters, shops, statue, arenas, enemies, bosses and aura particles | `AssetRegistry` |
+| **World §3** | **Kept.** The Studio hub is found at runtime; HubFallback adds labeled placeholders for anything missing, including DailyRewards, Leaderboard and CosmeticShop | `HubFallback` |
 
-| System (spec §) | Before | Now | Where |
-|---|---|---|---|
-| Persistence §5 | GetAsync + blind UpdateAsync, no lock, v1 | **Done.** UpdateAsync only, session lock (job id + heartbeat, 5 min expiry), retries with backoff, schema v2 + v1 migration, autosave 60 s, debounced save after purchases, release on leave, BindToClose, kick instead of defaults on failure | `server/DataService`, `server/DataSchema` |
-| Economy §5.3 / §10 | Inline in MonsterService | **Done.** `Game.addCash` / `Game.spend` are the only cash writers. Plain numbers capped at 1e15 (ponytail note to switch before costs pass that). One income loop (1 s). Offline earnings from server timestamps, 8 h cap. All current bonuses are permanent, so all of them apply offline | `server/Game`, `MonsterService` |
-| RNG §6.2 / §6.4 | Weights × luck on Rare+, normalized | **Done.** Shared weighted picker (invalid weights → 0, empty pool → nothing). Per-monster eligible pool (tier cap, die-exclusive Glitched). Luck = die × (1 + skill + 2%/rebirth), diminishing past 25, hard cap 500, tier-graded boost, renormalized. Index shows the server's effective odds | `Weighted`, `LuckConfig`, `MonsterConfig.pool` |
-| Inventory §8 | Stack counts per `id\|variant` | **Done.** Instances `{id, v, lvl, fr, lock, fav, t}` with ids `m<n>`; capacity 100 + storage nodes; lock, favorite, sell (last-copy confirm for Rare+), fusion (3 copies, atomic). **Partial:** no multi-select grid (there's a "sell duplicates" button), no research-material conversion, no collection milestone rewards (§8.2) | `MonsterService` InventoryAction, `client/BackpackUI` |
-| Base / placement §9, floors §3.3 / §13.1 | 10 pedestals, slots capped at 10, one floor | **Done.** Slots = 5 + r (cap 40), floors = min(3, 1 + r // 6). Slot→floor mapping: 1–10 on floor 1, 11–16 on floor 2, 17+ on floor 3. Upper floors use `Plot.Floor2/Floor3` from Studio if present, else generated placeholder decks with pedestals and elevator pads. A placement whose model is missing shows a placeholder | `Formulas`, `MonsterService` base section, `client/BaseUI` |
-| Monster upgrades §11 | — | **Done.** Cost = base × 25 × 1.2^(lvl−1), max level 50, income × (1 + 0.25(lvl−1)); combat × (1 + 0.05(lvl−1)). Preview values (`inc`, `nxt`, `cost`) are computed on the server and published | `Formulas`, `Game.publish` |
-| Dice §7 | Buy / equip | **Done.** Kept as it was, plus ownership check at roll time and the die's own pool. **Partial:** the shop shows die luck and rarity cap, but effective luck only for the equipped die | `MonsterService`, `client/DiceUI` |
-| Skill tree §12 | Hex tree, 4 effects live | **Partial.** Same tree. `income`, `luck`, `rollspeed`, `walkspeed`, `damage`, `health`, `storage` and `sell` are all live through `Tree.stat` (one place). **Missing:** the spec's six named branches and nodes, ranks, cross-branch multi-prerequisites, respec | `SkillTree`, `client/SkillTreeUI` |
-| Rebirth §13 | Cost → cash reset, +1 slot | **Done.** Requirement table (cost, plus boss gate from rebirth 3). Reset policy explicit in `RebirthConfig.Resets/Keeps` and pure `apply()`. Permanent +10% income and +2% luck per rebirth; AP 1 per rebirth, 6 on floor milestones. **Missing:** the Ascension Tree to spend AP | `RebirthConfig`, `MonsterService` |
-| Chests / gear §14 | Gear on a base slot | **Done.** Gear sits on a monster instance (one per type) and boosts income + weapon damage / armor HP / accessory speed. Batch open 1–10, paid and granted in one step. **Partial:** no gear levels, secondary stats or relics | `ChestService`, `GearConfig`, `client/ChestUI` |
-| Crafting §14.6 | — | **Done (small).** Materials from battles, two recipes (Rare and Epic gear), server-checked | `GearConfig.Recipes`, `ChestService` |
-| Battle §15 | Engine + one region | **Done (core).** Statuses burn, poison, freeze, stun, weaken, expose, shield, regen (+cleanse), with control immunity (bosses longer). AI weighs element and HP and self-buffs when hurt. Saved team of 3. Grassland + Forest regions with die gating, materials, guaranteed first-clear boss gear, single payout. **Missing:** Mark, team presets beyond 1, reserves/switching, 3D arenas (battles are a 2D UI), regions 3–9, other battle modes | `BattleEngine`, `BattleConfig`, `BattleService`, `client/BattleUI` |
-| Security §18 | Shared 0.2 s cooldown | **Done.** `Guard`: per-action cooldowns + token bucket (12 burst, 8/s); string/int/id-list validation; ownership checked against server data on every remote. Remote layout kept: 7 RemoteFunctions in `ReplicatedStorage.Monster`, `InventoryAction` added | `server/Guard` |
-| Private state §19 | All Player attributes (visible to everyone) | **Done.** `PlayerGui.State` ScreenGui, only replicated to its owner. Public: `PlotId`, `DataStatus`, `PlotStatus`, leaderstats Cash/Rebirths | `Game.state` |
-| Asset registry §4 | `MonsterModel` looked in a folder | **Done.** `AssetRegistry` Get/Has/Create/Register/ValidateRegistry. Labeled magenta placeholders. One summary line per category at server start | `shared/Monster/AssetRegistry`, `HubFallback` |
-| World §3 | Built in Studio (~3,200 instances) | **Kept.** Code finds it at runtime. `HubFallback` adds labeled placeholders only for missing pieces. **Not in repo:** the Studio world itself; layout config covers placeholders only | `HubFallback`, `serverstorage/HubBuildKit` |
-| HUD §17.1 | Leaderstats only | **Partial.** HudUI shows cash, cash/s, save status, plot-full notice, offline summary and server notices. **Missing:** current region, quest indicator, roll button (rolling stays at the summon prompt) | `client/HudUI` |
-| Leaderboards §19, daily rewards / quests / events §20, premium shop §3.4, collection milestones §8.2, auto-roll §17.2, rare-roll announcements §6.3 | — | **Missing** | — |
+### Still not done (deliberately left for later)
+
+- **Battle modes beyond story + regional bosses:** Endless Tower, Daily Challenges, Element Trials, Survival, co-op raids, PvP. The spec says to prioritize story and bosses; the engine takes any enemy list, so these are content plus a mode selector.
+- **Reserve monsters / switching in battle.** The spec only asks for this "once reserves are introduced".
+- **Converting duplicates into research materials.** Listed as optional ("may").
+- **Robux ids.** `title_vip.gamepass` and `aura_supporter.product` in `ProgressConfig` are `nil` until you create the gamepass and product on Roblox. The UI shows "Coming soon".
+- **Battle visuals.** Arenas and units are static placeholders; turns don't play attack animations yet.
+- **Balance.** Every number is a placeholder: costs, curves, regions 3–9 stats (×2.5 per region), rewards.
 
 ## Studio playtest checklist (highest risk first)
 
 1. **Hub names match.** Code expects:
-   - `Workspace.Hub.Plots.Plot<N>`: attributes `PlotId`, `Owner = ""`, `Color`; children `Base`, `OwnerSign` (SurfaceGuis with `Label`), `SpawnPoint`, `Slot1..10` (attribute `SlotIndex`), `Collect1..10` (with `Label`).
+   - `Workspace.Hub.Plots.Plot<N>`: attributes `PlotId`, `Owner = ""`, `Color`; children `Base`, `OwnerSign`, `SpawnPoint`, `Slot1..10` (attribute `SlotIndex`), `Collect1..10`.
    - `Workspace.Hub.Shops.SummonArea.SummonCore`, which has a ProximityPrompt.
-   - Prompts under models named `DiceShop`, `ChestShop`, `UpgradeTree`, `RebirthAltar` and `Index`.
+   - Prompts under models named `DiceShop`, `ChestShop`, `UpgradeTree`, `RebirthAltar`, `Index`, `DailyRewards`, `Leaderboard` and `CosmeticShop`.
    
-   Anything missing gets a magenta "PLACEHOLDER" stand-in, and Output says so.
-2. **Private State replication.** The server creates `PlayerGui.State` (ScreenGui, `ResetOnSpawn = false`). Every client UI waits for it. Check:
-   - It appears for its owner.
-   - It survives a respawn.
-   - It does not appear for other players.
+   Missing pieces become magenta "PLACEHOLDER" stand-ins, and Output says so.
+2. **Private State replication.** The server creates `PlayerGui.State` (ScreenGui, `ResetOnSpawn = false`) and every client UI waits for it. Check that it:
+   - appears for its owner,
+   - survives a respawn,
+   - is not visible to other players.
 3. **Saves in a published place.**
-   - Join, roll, place, leave, rejoin.
-   - Two servers: join the second while the first is still open. The second should wait about 30 s and then kick with "still open on another server".
-   - An existing v1 save migrates (stacks become instances, placements and gear follow).
-4. **Floors.**
-   - `DevSetRebirths` 6, then 12: Floor2 and Floor3 decks appear and the elevator prompts teleport you.
-   - BaseUI prompts appear on the new pedestals.
-   - Placing on slot 11 and on slot 17 works.
-5. **Attribute sizes** with a full backpack (100–200 monsters): the `Monsters` JSON is about 30 KB.
-6. **UI layouts on a phone-sized viewport.**
-   - BackpackUI is new and dense.
-   - The BattleUI stage list now scrolls.
-7. **Balance.** Every number is a placeholder: upgrade curve, fuse/sell values, rebirth cost 25k × 3^r, offline cap, luck caps, Forest region stats.
+   - Join, roll, place, buy tree ranks, leave, rejoin.
+   - Second-server lock: expect a ~30 s wait, then a kick.
+   - An existing v1/v2 save migrates. Old tree nodes come back as cash, so tell testers.
+4. **Evolution Tree UI.**
+   - 48 hexes with lines, on a phone and on desktop.
+   - Tap-tap purchase, search jump, respec confirmation, Ascension panel.
+5. **Floors and elevators** at `DevSetRebirths` 6 and 12.
+6. **Battle arena.**
+   - You're teleported to a far-off platform; KO'd units disappear.
+   - Leaving returns you to where you were.
+   - The see-through battle screen is still readable.
+7. **ActionUI dash** (LinearVelocity) feels right and can't push you through walls more than normal movement can.
+8. **Leaderboards** populate after about 2 min in a live server.
+9. **Cosmetics**: a title shows over the head; an aura emits.
+10. **Attribute sizes** with a full backpack (≈30 KB `Monsters` JSON). **HUD overlap** on small screens: the left button stack (BAG to TREE), the top-left row and the right action column.
 
 ## Model assets the code asks for (registry ids)
 
 Drop a `Model` named with the id into `ReplicatedStorage.Assets.<Category>`, or call `AssetRegistry.RegisterAsset`. Models need a PrimaryPart (or any BasePart). A Humanoid is not required.
 
-**Monsters** (36), `ReplicatedStorage.Assets.Monsters.<id>`, used by base pedestals, roll reveals and Index viewports:
+**Monsters** (36), `Assets.Monsters.<id>`, used on pedestals, roll reveals, Index viewports and battle arenas:
 
 | Rarity | Ids |
 |---|---|
@@ -161,14 +175,24 @@ Drop a `Model` named with the id into `ReplicatedStorage.Assets.<Category>`, or 
 | Secret | `the_watcher`, `mimic_king`, `hollow_echo` |
 | Glitched (Glitch die only) | `null_0`, `err0r_beast`, `missing_texture` |
 
+**Battle** (`Assets.Arenas`, `Assets.Enemies`, `Assets.Bosses`). Enemy ids are the enemy name in snake_case.
+
+| Category | Ids |
+|---|---|
+| Arenas | `grassland_arena`, `forest_arena`, `desert_arena`, `mountain_arena`, `volcano_arena`, `cave_arena`, `heaven_arena`, `cosmic_arena`, `glitch_arena` |
+| Enemies | `wild_slime`, `moss_goblin`, `thorn_sprite`, `bark_hound`, `ember_wisp`, `grove_warden`, `spore_witch`, `dust_scarab`, `sand_djinn`, `ice_ram`, `crag_golem`, `lava_hound`, `ash_wyrm`, `crystal_bat`, `deep_lurker`, `cloud_sprite`, `halo_knight`, `star_mote`, `nebula_eater`, `corrupt_byte`, `stack_overflow` |
+| Bosses | `overgrown_brute`, `elder_root`, `pharaoh_of_dust`, `frost_king`, `infernos_the_world_eater`, `the_buried_ancient`, `the_fallen_luminary`, `the_star_devourer`, `the_null_sovereign` |
+
+**Cosmetics** (`Assets.Particles`): ParticleEmitters named `aura_ember`, `aura_meadow`, `aura_solar`, `aura_glitch` and `aura_supporter`. Missing ones fall back to a colored default emitter.
+
 **Used only when the Studio hub lacks that piece** (HubFallback):
 
 | Category | Ids |
 |---|---|
-| Shops (`Assets.Shops`) | `summon_station`, `dice_shop`, `chest_shop`, `upgrade_tree`, `rebirth_altar`, `index_codex` |
+| Shops (`Assets.Shops`) | `summon_station`, `dice_shop`, `chest_shop`, `upgrade_tree`, `rebirth_altar`, `index_codex`, `daily_rewards`, `leaderboard_board`, `cosmetic_shop` |
 | Statues (`Assets.Statues`) | `main_statue` |
 
-**Optional:** `Plot<N>.Floor2` / `Floor3` models built in Studio. Put pedestal parts named `Slot<i>` with attribute `SlotIndex` in them:
+**Optional:** `Plot<N>.Floor2` / `Floor3` models with `Slot<i>` parts (attribute `SlotIndex`):
 
 | Floor | Slots |
 |---|---|
@@ -177,4 +201,4 @@ Drop a `Model` named with the id into `ReplicatedStorage.Assets.<Category>`, or 
 
 They replace the generated placeholder decks.
 
-**Not referenced by code yet:** the spec categories Dice, Bases, Chests, Weapons, Armor, Accessories, Relics, Arenas, Enemies, Bosses, Icons, Sounds, Particles, Animations and Portals. Dice, chests and gear are drawn as UI swatches or emoji, and battles are 2D. They have registry categories ready, but no code asks for them.
+**Not referenced by code yet:** the Dice, Bases, Chests, Weapons, Armor, Accessories, Relics, Icons, Sounds, Animations and Portals categories. Those items are drawn as UI swatches or emoji today.

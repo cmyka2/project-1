@@ -61,6 +61,29 @@ return function(E)
 	local hp0 = g.units[1].hp
 	E.hit(g, g.units[2], g.units[1], 1)
 	assert(g.units[1].hp == hp0 and g.units[1].shield < 250, "shield absorbed the hit")
+	-- skill-tree mods: Last Stand survives one lethal hit, Team Protection / Boss Hunter scale damage
+	local tough = { name = "Tough", element = "Cosmic", hp = 10, dmg = 1, def = 0, spd = 1, mods = { laststand = 1, protect = 0.5 } }
+	local brute = { name = "Brute", element = "Cosmic", hp = 1000, dmg = 1000, def = 0, spd = 99 }
+	local ls = E.new({ tough }, { brute }, noCrit)
+	E.hit(ls, ls.units[2], ls.units[1], 1)
+	assert(ls.units[1].alive and ls.units[1].hp == 1, "last stand")
+	E.hit(ls, ls.units[2], ls.units[1], 1)
+	assert(not ls.units[1].alive, "only once")
+	local d5 = duel({ name = "A", element = "Cosmic", hp = 1e6, dmg = 100, def = 0, spd = 10, mods = { boss = 0.5 } },
+		{ name = "Boss", element = "Cosmic", hp = 1e6, dmg = 1, def = 100, spd = 1, boss = true, mods = { protect = 0.2 } })
+	assert(E.hit(d5, d5.units[1], d5.units[2], 1) == 60, "50 x 1.5 boss bonus x 0.8 protect = 60")
+	-- ultimates Mark every surviving foe (+20% damage taken)
+	local ub = E.new({ { name = "U", element = "Cosmic", hp = 1e6, dmg = 10, def = 0, spd = 50 } }, { u("Cosmic", 1, 0), u("Cosmic", 1, 0) }, noCrit)
+	ub.units[1].energy = 100
+	assert(E.act(ub, "ultimate"))
+	assert(ub.units[2].status.mark and ub.units[3].status.mark, "marked")
+	-- roles: Healer skill heals the most-hurt ally
+	local healer = { name = "Medic", element = "Light", role = "Healer", hp = 1000, dmg = 10, def = 0, spd = 50 }
+	local hurt = { name = "Hurt", element = "Cosmic", hp = 1000, dmg = 10, def = 0, spd = 1 }
+	local hb = E.new({ healer, hurt }, { u("Cosmic", 1, 0) }, noCrit)
+	hb.units[2].hp = 100
+	assert(E.act(hb, "skill", 3))
+	assert(hb.units[2].hp == 100 + math.floor(1000 * B.Roles.Healer.heal), "healer heal")
 	-- bosses resist chain control longer
 	assert(B.BOSS_CONTROL_IMMUNE > B.CONTROL_IMMUNE)
 

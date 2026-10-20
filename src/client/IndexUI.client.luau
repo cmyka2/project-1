@@ -68,6 +68,14 @@ for i, def in Config.Monsters do
 	vp.BackgroundColor3 = Color3.fromRGB(25, 27, 40) vp.Ambient = Color3.fromRGB(190, 190, 190) vp.LightDirection = Vector3.new(-1, -1, 1) vp.Parent = card
 	corner(vp, 10)
 	local badge = text("TextLabel", vp, "", UDim2.fromScale(0.7, 0.2), UDim2.fromScale(0.02, 0.02))
+	-- hover/tap a discovered card to read its lore and role in the header line
+	local hit = Instance.new("TextButton") hit.Size = UDim2.fromScale(1, 1) hit.BackgroundTransparency = 1 hit.Text = "" hit.ZIndex = 3 hit.Parent = card
+	local function showLore()
+		local c = cards[def.id]
+		if c and c.found then progress.Text = def.name .. " (" .. (Config.RoleByElement[def.element] or "") .. "): " .. (Config.Lore[def.id] or "") end
+	end
+	hit.MouseEnter:Connect(showLore)
+	hit.MouseButton1Click:Connect(showLore)
 	badge.TextXAlignment = Enum.TextXAlignment.Left badge.ZIndex = 2
 	cards[def.id] = {
 		vp = vp, badge = badge, state = nil,
@@ -106,6 +114,7 @@ function refreshAll()
 		local disc = data.D[def.id]
 		local f = disc ~= nil and disc[tab] == true
 		if f then found += 1 end
+		c.found = disc ~= nil
 		render(c, def, f)
 		c.name.Text = f and def.name or "???"
 		c.rar.Text = def.rarity .. " • " .. oneIn(def.rarity)
