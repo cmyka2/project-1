@@ -39,7 +39,7 @@ R.stubs = { MonsterModel = { build = function(def, v)
 	m.PrimaryPart = p
 	return m
 end } }
-for _, s in { "PlotAssigner", "MonsterService", "ChestService", "BattleService", "ProgressService", "LeaderboardService" } do R.runScript(SRC .. s .. ".server.luau", s) end
+for _, s in { "PlotAssigner", "MonsterService", "ChestService", "BattleService", "ProgressService", "LeaderboardService", "MonetizationService" } do R.runScript(SRC .. s .. ".server.luau", s) end
 R.run(1)
 local Game = R.req(R.SSS.Game)
 local F = R.req(R.RS.Monster.Formulas)
@@ -345,6 +345,77 @@ R.run(12)
 local lb = R.RS:GetAttribute("Leaderboards")
 check(lb and R.decode(lb).boards[1].entries[1] ~= nil, "leaderboard published (server fallback)")
 check(R.decode(R.encode(p.data)) ~= nil, "profile still JSON-serializable")
+
+print("robux shop: passes, products, receipts, region policy, rolls")
+local Mon = R.req(R.RS.Monster.MonetizationConfig)
+local MPS = R.services.MarketplaceService
+Mon.PassById.lucky.gamepass, Mon.PassById.triple_roll.gamepass, Mon.ProductById.lucky_10.product, Mon.ProductById.server_luck.product = 222, 333, 111, 444
+R.run(1.1)
+check(select(2, R.invoke("RobuxAction", A, "pass", "super_lucky")) == "Coming soon", "pass without an id isn't sold")
+local base = Game.luck(p)
+MPS.PromptGamePassPurchaseFinished:Fire(A, 222, true)
+R.run(0.2)
+check(p.passes.lucky and math.abs(Game.luck(p) / base - 2) < 1e-9, "Lucky pass: exactly 2x luck")
+R.run(1.1)
+check(select(2, R.invoke("RobuxAction", A, "pass", "lucky")) == "Already owned", "owned pass not re-sold")
+local function receipt(pid, product) return MPS.ProcessReceipt({ PlayerId = A.UserId, PurchaseId = pid, ProductId = product }) end
+local lr0 = p.data.LuckyRolls
+local dec
+R.task.spawn(function() dec = receipt("r-1", 111) end)
+R.run(1)
+check(tostring(dec):find("PurchaseGranted") and p.data.LuckyRolls == lr0 + 10, "10 Lucky Rolls granted after the save")
+R.task.spawn(function() dec = receipt("r-1", 111) end)
+R.run(1)
+check(tostring(dec):find("PurchaseGranted") and p.data.LuckyRolls == lr0 + 10, "same receipt never grants twice")
+local bLuck = Game.luck(Game.get(B))
+R.task.spawn(function() receipt("r-2", 444) end)
+R.run(1)
+check(math.abs(Game.luck(Game.get(B)) / bLuck - 2) < 1e-9, "Server Luck doubles everyone's luck")
+Game.serverLuck = { mult = 1, ends = 0 }
+p.restricted = true
+check(math.abs(Game.luck(p) / base - 1) < 1e-9, "restricted region: paid luck not applied")
+R.run(1.1)
+check(select(1, R.invoke("RobuxAction", A, "product", "lucky_10")) == false, "restricted region: can't buy luck items")
+p.restricted = false
+-- rolls: lucky roll consumed, golden every 10th, triple roll pass
+p.data.Rolls = 18
+local lr1 = p.data.LuckyRolls
+local n0 = Game.count(p.data.Monsters)
+local lucky0 = p.data.LuckyRolls
+p.data.Settings.useLucky = true
+R.run(1)
+summon.Triggered:Fire(A)
+R.run(0.1)
+local last = R.attr(A, "LastRoll")
+check(p.data.LuckyRolls == lucky0 - 1 and last.special and last.special:find("lucky"), "a Lucky Roll is used up")
+R.run(1)
+summon.Triggered:Fire(A)
+R.run(0.1)
+check(R.attr(A, "LastRoll").special and R.attr(A, "LastRoll").special:find("golden"), "20th roll is Golden")
+MPS.PromptGamePassPurchaseFinished:Fire(A, 333, true)
+R.run(1)
+local n1 = Game.count(p.data.Monsters)
+summon.Triggered:Fire(A)
+R.run(0.1)
+check(Game.count(p.data.Monsters) >= n1 + 3 and #R.attr(A, "LastRoll").more >= 2, "Triple Roll rolls 3")
+p.data.Settings.useLucky = false
+local lucky2 = p.data.LuckyRolls
+R.run(1)
+summon.Triggered:Fire(A)
+R.run(0.1)
+check(p.data.LuckyRolls == lucky2, "Lucky Rolls saved when turned off")
+-- codes
+R.run(0.6)
+local okc2, resc = R.invoke("ProgressAction", A, "code", "  release ")
+check(okc2 and p.data.Codes.RELEASE, "code redeemed (case/space-insensitive): " .. tostring(resc))
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "code", "RELEASE")) == false, "code only once")
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "code", "NOPE")) == false, "bad code")
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "setting", "skipBelow", 4)) == true and p.data.Settings.skipBelow == 4, "setting saved")
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "setting", "skipBelow", 99)) == false, "bad setting value")
 
 print("22-23. leave + rejoin: everything persists, offline earnings capped")
 local saved = { cash = p.data.Cash, mons = Game.count(p.data.Monsters), placed1 = p.data.Placed["1"], gear = Game.count(p.data.Gear), reb = p.data.Rebirths }

@@ -118,7 +118,8 @@ end
 -- the roll pool: { { def, weight } } in roster order. Each rarity's weight (1/oneIn, reshaped by luck) is
 -- split evenly across its eligible monsters, so a rarity's odds don't depend on how many monsters it has.
 -- Ineligible monsters (above the die's tier cap, or exclusive to another die) never enter the pool.
-function Config.pool(luck: number?, maxTier: number?, dieId: string?)
+-- biome = { element, mult }: that element's monsters get mult x weight (active weather), then everything renormalizes.
+function Config.pool(luck: number?, maxTier: number?, dieId: string?, biome: { element: string, mult: number }?)
 	luck = math.max(1, luck or 1)
 	maxTier = math.max(1, maxTier or #Config.Rarities)
 	local count = {}
@@ -129,15 +130,16 @@ function Config.pool(luck: number?, maxTier: number?, dieId: string?)
 	for _, def in Config.Monsters do
 		if eligible(def, maxTier, dieId) then
 			local rar, tier = Config.RarityById[def.rarity], Config.Tier[def.rarity]
-			table.insert(out, { def, (1 / rar.oneIn) * Luck.tierMult(luck, tier) / count[def.rarity] })
+			local boost = biome and def.element == biome.element and biome.mult or 1
+			table.insert(out, { def, (1 / rar.oneIn) * Luck.tierMult(luck, tier) / count[def.rarity] * boost })
 		end
 	end
 	return out
 end
 
 -- real odds per rarity for this luck/die, summing to 1 (what the UI shows)
-function Config.oddsFor(luck: number?, maxTier: number?, dieId: string?)
-	local pool = Config.pool(luck, maxTier, dieId)
+function Config.oddsFor(luck: number?, maxTier: number?, dieId: string?, biome: any?)
+	local pool = Config.pool(luck, maxTier, dieId, biome)
 	local p, out = Weighted.odds(pool), {}
 	for i, e in pool do out[e[1].rarity] = (out[e[1].rarity] or 0) + p[i] end
 	return out
@@ -145,8 +147,8 @@ end
 Config.Odds = Config.oddsFor(1)
 
 -- server-only in practice; rng is injectable so tests can seed it. nil when the pool is empty.
-function Config.roll(rng: Random, luck: number?, maxTier: number?, dieId: string?)
-	local def = Weighted.pick(Config.pool(luck, maxTier, dieId), rng)
+function Config.roll(rng: Random, luck: number?, maxTier: number?, dieId: string?, biome: any?)
+	local def = Weighted.pick(Config.pool(luck, maxTier, dieId, biome), rng)
 	if not def then return nil end
 	local v, acc, variant = rng:NextNumber(), 0, "Normal"
 	for k = #Config.Variants, 2, -1 do

@@ -8,6 +8,7 @@ local M = RS:WaitForChild("Monster")
 local B = require(M:WaitForChild("BattleConfig"))
 local P = require(M:WaitForChild("ProgressConfig"))
 local Config = require(M:WaitForChild("MonsterConfig"))
+local Mon = require(M:WaitForChild("MonetizationConfig"))
 
 local function short(n)
 	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
@@ -30,6 +31,7 @@ local cash = text(gui, UDim2.fromOffset(320, 40), UDim2.new(0.5, 0, 0, 6), Color
 local region = text(gui, UDim2.fromOffset(320, 22), UDim2.new(0.5, 0, 0, 46), Color3.fromRGB(200, 230, 255))
 local status = text(gui, UDim2.fromOffset(520, 26), UDim2.new(0.5, 0, 0, 70), Color3.fromRGB(255, 220, 120))
 local events = text(gui, UDim2.fromOffset(520, 24), UDim2.new(0.5, 0, 0, 96), Color3.fromRGB(255, 170, 255))
+local boosts = text(gui, UDim2.fromOffset(620, 24), UDim2.new(0.5, 0, 0, 122), Color3.fromRGB(150, 255, 170))
 local toast = text(gui, UDim2.fromScale(0.6, 0.06), UDim2.fromScale(0.5, 0.2), Color3.new(1, 1, 1))
 local lim = Instance.new("UISizeConstraint") lim.MaxSize = Vector2.new(640, 54) lim.Parent = toast
 local banner = text(gui, UDim2.fromScale(0.7, 0.05), UDim2.fromScale(0.5, 0.27), Color3.new(1, 1, 1))
@@ -116,6 +118,27 @@ end
 state:GetAttributeChangedSignal("Progress"):Connect(refreshQuests)
 state:GetAttributeChangedSignal("LifetimeEarnings"):Connect(refreshQuests)
 refreshQuests()
+
+-- luck line: banked Lucky Rolls, next Golden/Rainbow roll, biome and Server Luck timers (ticks every second)
+local function clock(secs) return ("%d:%02d"):format(secs // 60, secs % 60) end
+task.spawn(function()
+	while true do
+		local parts, now = {}, os.time()
+		local lucky = state:GetAttribute("LuckyRolls") or 0
+		if lucky > 0 then table.insert(parts, "🍀 Lucky Rolls: " .. lucky) end
+		local rolls = decode(state:GetAttribute("Progress")).rolls or 0
+		local toG, toR = Mon.GOLDEN_EVERY - rolls % Mon.GOLDEN_EVERY, Mon.RAINBOW_EVERY - rolls % Mon.RAINBOW_EVERY
+		table.insert(parts, toR <= toG and ("🌈 Rainbow in " .. toR) or ("✨ Golden in " .. toG))
+		local b = decode(RS:GetAttribute("Biome"))
+		if b.id and P.BiomeById[b.id] and b.ends > now then table.insert(parts, P.BiomeById[b.id].icon .. " " .. P.BiomeById[b.id].name .. " " .. clock(b.ends - now)) end
+		local sl = decode(RS:GetAttribute("ServerLuck"))
+		if sl.ends and sl.ends > now then table.insert(parts, "🌍 Server Luck x" .. sl.mult .. " " .. clock(sl.ends - now)) end
+		local pot = decode(state:GetAttribute("Boosts")).luck
+		if pot and pot.ends > now then table.insert(parts, "🧪 x" .. pot.mult .. " luck " .. clock(pot.ends - now)) end
+		boosts.Text = table.concat(parts, "   •   ")
+		task.wait(1)
+	end
+end)
 
 local function offline()
 	local o = decode(state:GetAttribute("OfflineEarnings"))

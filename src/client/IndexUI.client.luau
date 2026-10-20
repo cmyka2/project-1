@@ -1,4 +1,4 @@
--- Index panel (rarity + Normal/Huge/Monstrous pages), HUD button and roll toast.
+-- Index panel (rarity + Normal/Huge/Monstrous pages) and HUD button. Roll reveals live in RollFX.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local PPS = game:GetService("ProximityPromptService")
@@ -20,9 +20,13 @@ local function fmt(n)
 	if n >= 1e9 then return ("%.1fB"):format(n / 1e9) elseif n >= 1e6 then return ("%.1fM"):format(n / 1e6) elseif n >= 1e4 then return ("%.1fK"):format(n / 1e3) end
 	return tostring(math.floor(n + 0.5))
 end
--- the player's real odds: effective luck + equipped die's rarity cap and pool (published by the server)
+-- the player's real odds: effective luck + equipped die's rarity cap and pool + active biome (published by the server)
+local function biome()
+	local ok, b = pcall(Http.JSONDecode, Http, RS:GetAttribute("Biome") or "")
+	return ok and b.element and { element = b.element, mult = b.mult } or nil
+end
 local function oneIn(rarity)
-	local p = Config.oddsFor(state:GetAttribute("Luck") or 1, state:GetAttribute("MaxTier"), state:GetAttribute("SelectedDie"))[rarity] or 0
+	local p = Config.oddsFor(state:GetAttribute("Luck") or 1, state:GetAttribute("MaxTier"), state:GetAttribute("SelectedDie"), biome())[rarity] or 0
 	return p > 0 and "1 in " .. fmt(1 / p) or "better die needed"
 end
 
@@ -131,21 +135,4 @@ PPS.PromptTriggered:Connect(function(prompt) if prompt:FindFirstAncestor("Index"
 state:GetAttributeChangedSignal("Index"):Connect(function() if panel.Visible then refreshAll() end end)
 state:GetAttributeChangedSignal("Luck"):Connect(function() if panel.Visible then refreshAll() end end)
 state:GetAttributeChangedSignal("SelectedDie"):Connect(function() if panel.Visible then refreshAll() end end)
-
--- roll toast
-local toast = text("TextLabel", gui, "", UDim2.fromScale(0.6, 0.08), UDim2.fromScale(0.5, 0.1))
-toast.AnchorPoint = Vector2.new(0.5, 0) toast.Visible = false
-local tlim = Instance.new("UISizeConstraint") tlim.MaxSize = Vector2.new(640, 70) tlim.Parent = toast
-local shown = 0
-state:GetAttributeChangedSignal("LastRoll"):Connect(function()
-	local ok, r = pcall(Http.JSONDecode, Http, state:GetAttribute("LastRoll"))
-	local def = ok and Config.ById[r.id]
-	if not def then return end
-	local v = Config.VariantById[r.v]
-	toast.Text = (r.new and "NEW! " or "") .. (r.v ~= "Normal" and r.v:upper() .. " " or "") .. def.name .. "  (" .. def.rarity .. ", " .. oneIn(def.rarity) .. ")"
-	toast.TextColor3 = r.v ~= "Normal" and v.color or Config.RarityById[def.rarity].color
-	toast.Visible = true
-	shown += 1
-	local mine = shown
-	task.delay(2.5, function() if shown == mine then toast.Visible = false end end)
-end)
+RS:GetAttributeChangedSignal("Biome"):Connect(function() if panel.Visible then refreshAll() end end)

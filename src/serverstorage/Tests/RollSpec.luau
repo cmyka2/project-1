@@ -34,6 +34,14 @@ return function()
 	for _ = 1, 50000 do if C.Tier[C.roll(lr, 20).rarity] >= 3 then lucky1 += 1 end end
 	local expect = 0 for id, p in lucky do if C.Tier[id] >= 3 then expect += p end end
 	assert(math.abs(lucky1 / 50000 - expect) < 0.01, "lucky rare+ rate off: " .. lucky1 / 50000)
+	-- multipliers (passes, potions, Golden/Lucky rolls) apply after diminishing returns, so "2x" is exactly 2x
+	assert(math.abs(L.combine(40, 1, 2) / L.combine(40, 1) - 2) < 1e-9, "2x multiplier is exact")
+	assert(L.combine(40, 1, 1e12) == L.HARD_CAP, "hard cap")
+	-- biomes boost one element's monsters and odds stay normalized
+	local rain = { element = "Water", mult = 3 }
+	local function elementShare(pool) local w, t = 0, 0 for _, e in pool do t += e[2] if e[1].element == "Water" then w += e[2] end end return w / t end
+	assert(elementShare(C.pool(5, 8, "mountain", rain)) > elementShare(C.pool(5, 8, "mountain")) * 1.5, "biome boosts its element")
+	assert(math.abs(total(C.oddsFor(5, 8, "mountain", rain)) - 1) < 1e-9, "biome odds normalized")
 	-- world eligibility: Glitched monsters only come from the Glitch die
 	assert((C.oddsFor(40, 12, "cosmic").Glitched or 0) == 0, "cosmic die must not roll Glitched")
 	assert((C.oddsFor(40, 12, "glitch").Glitched or 0) > 0, "glitch die rolls Glitched")

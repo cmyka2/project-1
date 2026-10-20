@@ -15,6 +15,7 @@ local Rebirth = require(M.RebirthConfig)
 local Luck = require(M.LuckConfig)
 local F = require(M.Formulas)
 local Progress = require(M.ProgressConfig)
+local Mon = require(M.MonetizationConfig)
 local Data = require(script.Parent.DataService)
 
 local Game = {}
@@ -23,14 +24,17 @@ Game.BASE_CAPACITY, Game.MAX_GEAR, Game.TEAM_SIZE = 100, 200, 3
 Game.BaseChanged = Instance.new("BindableEvent") -- (player) that player's plot needs a re-render
 Game.Changed = Instance.new("BindableEvent") -- (player) progress counters moved: quests/milestones re-check
 Game.events = {} -- active ProgressConfig events, kept current by ProgressService
+Game.biome = nil -- active ProgressConfig biome (server-wide weather), kept current by ProgressService
+Game.serverLuck = { mult = 1, ends = 0 } -- bought Server Luck, kept by MonetizationService
 Game.rng = Random.new()
 Game.get = Data.get
 
 function Game.count(t) local n = 0 for _ in t do n += 1 end return n end
--- every permanent bonus source in one sum: Evolution Tree ranks + Ascension ranks + collection milestones
+-- every permanent bonus source in one sum: Evolution Tree ranks + Ascension ranks + collection milestones + gamepasses
+-- (p.passes = gamepasses owned this session; Roblox, not our save, is the source of truth for those)
 function Game.stat(p, effect)
 	local d = p.data
-	local s = Tree.stat(d.Skills, effect) + Tree.stat(d.Ascension, effect, Tree.AscById)
+	local s = Tree.stat(d.Skills, effect) + Tree.stat(d.Ascension, effect, Tree.AscById) + Mon.passStat(p.passes or {}, effect)
 	for _, m in Progress.Milestones do
 		if m.effects and m.effects[effect] and d.Milestones[m.id] then s += m.effects[effect] end
 	end
@@ -44,7 +48,19 @@ end
 function Game.die(p) return DiceConfig.ById[p.data.SelectedDie] or DiceConfig.List[1] end
 -- additive luck (skills, ascension, milestones, rebirths); shown in the dice shop to preview every die
 function Game.luckAdd(p) return Game.stat(p, "luck") + p.data.Rebirths * Rebirth.LUCK_BONUS end
-function Game.luck(p) return Luck.combine(Game.die(p).luck * Game.boost(p, "luck"), Game.luckAdd(p)) end
+-- every luck multiplier, applied after diminishing returns: events and personal boosts (daily, potions),
+-- Server Luck, Premium, and luck gamepasses (not for players whose region restricts paid random items)
+function Game.luckMult(p)
+	local m = Game.boost(p, "luck")
+	if Game.serverLuck.ends > os.time() then m *= Game.serverLuck.mult end
+	if p.premium then m *= Mon.PREMIUM_LUCK end
+	if not p.restricted then m *= Mon.passStat(p.passes or {}, "luckMult") end
+	return m
+end
+-- effective luck for a roll; extra = per-roll multiplier (Golden / Rainbow / Lucky roll)
+function Game.luck(p, extra: number?) return Luck.combine(Game.die(p).luck, Game.luckAdd(p), Game.luckMult(p) * (extra or 1)) end
+-- the active biome as the roll pool expects it
+function Game.biomeBoost() return Game.biome and { element = Game.biome.element, mult = Game.biome.mult } or nil end
 function Game.capacity(p) return Game.BASE_CAPACITY + Game.stat(p, "storage") end
 function Game.slotCount(p) return F.slots(p.data.Rebirths) end
 local function cut(p, effect) return 1 - math.min(0.5, Game.stat(p, effect)) end -- discounts cap at 50%
@@ -260,6 +276,11 @@ function Game.publish(player: Player, p, ...)
 	s:SetAttribute("ChestLuck", Game.stat(p, "chestluck"))
 	s:SetAttribute("ChestDiscount", 1 - cut(p, "chestcost"))
 	s:SetAttribute("OfflineCap", Game.offlineCap(p))
+	s:SetAttribute("LuckyRolls", d.LuckyRolls)
+	s:SetAttribute("Settings", Http:JSONEncode(d.Settings))
+	s:SetAttribute("Passes", Http:JSONEncode(p.passes or {}))
+	s:SetAttribute("Restricted", p.restricted == true)
+	s:SetAttribute("MultiRoll", math.max(1, Mon.passStat(p.passes or {}, "multiRoll")))
 	local ls = player:FindFirstChild("leaderstats")
 	if ls and ls:FindFirstChild("Rebirths") then ls.Rebirths.Value = d.Rebirths end
 	Game.publishCash(player, p)

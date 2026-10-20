@@ -133,7 +133,7 @@ local IsA = {
 	TextLabel = { GuiObject = true }, TextButton = { GuiObject = true, GuiButton = true }, Frame = { GuiObject = true },
 	NumberValue = { ValueBase = true }, IntValue = { ValueBase = true },
 }
-local EVENTS = { PromptGamePassPurchaseFinished = true, OnClientEvent = true, Triggered = true, CharacterAdded = true, Event = true, Destroying = true, DescendantAdded = true, PlayerAdded = true, PlayerRemoving = true }
+local EVENTS = { PlayerMembershipChanged = true, PromptGamePassPurchaseFinished = true, OnClientEvent = true, Triggered = true, CharacterAdded = true, Event = true, Destroying = true, DescendantAdded = true, PlayerAdded = true, PlayerRemoving = true }
 local Methods = {}
 local function newInst(class, name)
 	local o = { ClassName = class, Name = name or class, _kids = {}, _attrs = {}, _asig = {}, _ev = {} }
@@ -366,6 +366,11 @@ svc("DataStoreService").GetDataStore = function() return Store end
 game.JobId = "server-A"
 function game:GetService(n) return services[n] end
 function game:BindToClose(fn) R.closers = R.closers or {} table.insert(R.closers, fn) end
+R.policy = {} -- [userId] = { ArePaidRandomItemsRestricted = bool }
+svc("PolicyService").GetPolicyInfoForPlayerAsync = function(_, player) return R.policy[player.UserId] or { ArePaidRandomItemsRestricted = false } end
+R.messages = {}
+svc("MessagingService").PublishAsync = function(_, topic, data) table.insert(R.messages, { topic = topic, data = data }) end
+services.MessagingService.SubscribeAsync = function() return { Disconnect = function() end } end
 local mps = svc("MarketplaceService")
 mps.UserOwnsGamePassAsync = function() return false end
 mps.PromptGamePassPurchase = function() end
@@ -410,10 +415,10 @@ local function module(parent, name, path)
 end
 local mon = newInst("Folder", "Monster")
 mon.Parent = RS
-for _, n in { "MonsterConfig", "Weighted", "LuckConfig", "Formulas", "RebirthConfig", "GearConfig", "BattleConfig", "DiceConfig", "SkillTree", "AssetRegistry", "MonsterModel", "ProgressConfig" } do
+for _, n in { "MonsterConfig", "Weighted", "LuckConfig", "Formulas", "RebirthConfig", "GearConfig", "BattleConfig", "DiceConfig", "SkillTree", "AssetRegistry", "MonsterModel", "ProgressConfig", "MonetizationConfig" } do
 	module(mon, n, ROOT .. "shared/Monster/" .. n .. ".luau")
 end
-for _, n in { "PlaceMonster", "BuySkill", "Rebirth", "DiceAction", "ChestAction", "BattleAction", "InventoryAction", "RollAction", "ProgressAction", "ShopAction" } do
+for _, n in { "PlaceMonster", "BuySkill", "Rebirth", "DiceAction", "ChestAction", "BattleAction", "InventoryAction", "RollAction", "ProgressAction", "ShopAction", "RobuxAction" } do
 	local rf = newInst("RemoteFunction", n)
 	rf.Parent = mon
 end

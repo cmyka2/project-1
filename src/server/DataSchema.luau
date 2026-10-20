@@ -16,6 +16,7 @@ S.MIGRATE_CAP = 300 -- v1 stack counts become at most this many monster instance
 	Stats = { [counter] = n } (quest/leaderboard counters), Quests = { [questId] = true } (claimed),
 	Milestones = { [milestoneId] = true }, Daily = { day, last (UTC day number) }, Boosts = { [effect] = { mult, ends } }
 	Cosmetics = { [cosmeticId] = true }, Equipped = { title?, aura? }, Receipts = { [purchaseId] = true }
+	LuckyRolls (banked 10x-luck rolls), Codes = { [CODE] = true }, Settings = { skipBelow?, useLucky? }
 	_lock = { job, t } while a server holds the session
 ]]
 function S.default()
@@ -25,7 +26,7 @@ function S.default()
 		Monsters = {}, NextMonsterId = 1, Placed = {}, Gear = {}, NextGearId = 1,
 		Skills = { start = 1 }, SkillSpent = 0, Ascension = {}, Discovered = {}, BattleProgress = {}, BattleTeams = {}, ActiveTeam = 1,
 		Materials = {}, Stats = {}, Quests = {}, Milestones = {}, Daily = { day = 0, last = -1 }, Boosts = {},
-		Cosmetics = {}, Equipped = {}, Receipts = {},
+		Cosmetics = {}, Equipped = {}, Receipts = {}, LuckyRolls = 0, Codes = {}, Settings = {},
 	}
 end
 

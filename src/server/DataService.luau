@@ -94,7 +94,7 @@ end
 -- writes the live table; refuses if another server took the lock (then this session stops saving)
 local function save(player: Player, release: boolean?)
 	local p = profiles[player]
-	if not p or not p.saveable or p.released then return end
+	if not p or not p.saveable or p.released then return false end
 	if release then p.released = true end
 	local lost = false
 	local ok = update(p.userId, function(old)
@@ -112,6 +112,12 @@ local function save(player: Player, release: boolean?)
 	elseif not ok then
 		warn("Save gave up for", p.userId, "(will retry on next autosave)")
 	end
+	return ok and not lost
+end
+
+-- immediate save (yields); true once written. Used before telling Roblox a purchase is granted.
+function D.saveNow(player: Player): boolean
+	return save(player) == true
 end
 
 -- debounced save after important changes (purchases, rebirth, rewards)

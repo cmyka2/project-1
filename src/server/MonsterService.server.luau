@@ -26,7 +26,7 @@ local short = Game.short
 local function applyWalk(player, p)
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 	if not hum then return end
-	hum.WalkSpeed = 16 + Game.stat(p, "walkspeed")
+	hum.WalkSpeed = 16 + Game.stat(p, "walkspeed") -- includes the VIP pass
 	hum.UseJumpPower = true
 	hum.JumpPower = 50 + Game.stat(p, "jump")
 end
@@ -136,16 +136,37 @@ local function renderSlot(player, p, i)
 	local text = pad and pad:FindFirstChild("Label", true)
 	if text then text.Text = inst and ("$" .. short(Game.income(p, iid)) .. "/s") or "$0" end
 	local old = shown:FindFirstChild("Slot" .. i)
-	if old and inst and old:GetAttribute("Iid") == iid then return end
-	if old then old:Destroy() end
+	if old and not (inst and old:GetAttribute("Iid") == iid) then old:Destroy() old = nil end
 	if not inst then return end
 	local def = Config.ById[inst.id]
-	local m = def and MonsterModel.build(def, inst.v) or Assets.CreateAsset("Monsters", inst.id, nil, Vector3.new(4, 4, 4))
-	m.Name = "Slot" .. i
-	m:SetAttribute("Iid", iid)
-	local top = slot.Position + Vector3.new(0, slot.Size.Y / 2, 0)
-	m:PivotTo(CFrame.lookAt(top, top - slot.CFrame.LookVector) * CFrame.new(0, def and 0 or 2, 0))
-	m.Parent = shown
+	local m = old
+	if not m then
+		m = def and MonsterModel.build(def, inst.v) or Assets.CreateAsset("Monsters", inst.id, nil, Vector3.new(4, 4, 4))
+		m.Name = "Slot" .. i
+		m:SetAttribute("Iid", iid)
+		local top = slot.Position + Vector3.new(0, slot.Size.Y / 2, 0)
+		m:PivotTo(CFrame.lookAt(top, top - slot.CFrame.LookVector) * CFrame.new(0, def and 0 or 2, 0))
+		m.Parent = shown
+	end
+	-- floating name / level / income tag over the pedestal (visible to everyone visiting the base)
+	local info = m:FindFirstChild("Info")
+	if not info then
+		local _, size = m:GetBoundingBox()
+		info = Instance.new("BillboardGui") info.Name = "Info" info.Size = UDim2.fromOffset(170, 54) info.MaxDistance = 70
+		info.StudsOffsetWorldSpace = Vector3.new(0, size.Y + 1.5, 0) info.Adornee = m.PrimaryPart
+		for k, h in { 0.42, 0.29, 0.29 } do
+			local t = Instance.new("TextLabel") t.Name = "L" .. k t.Size = UDim2.fromScale(1, h) t.Position = UDim2.fromScale(0, k == 1 and 0 or (k == 2 and 0.42 or 0.71))
+			t.BackgroundTransparency = 1 t.TextScaled = true t.Font = Enum.Font.FredokaOne t.TextStrokeTransparency = 0 t.Parent = info
+		end
+		info.Parent = m
+	end
+	local rar = def and Config.RarityById[def.rarity]
+	info.L1.Text = (inst.v ~= "Normal" and inst.v:upper() .. " " or "") .. (def and def.name or inst.id)
+	info.L1.TextColor3 = rar and rar.color or Color3.new(1, 1, 1)
+	info.L2.Text = (def and def.rarity or "?") .. "  •  Lv " .. inst.lvl .. (inst.fr > 0 and ("  ★" .. inst.fr) or "")
+	info.L2.TextColor3 = Color3.fromRGB(230, 230, 240)
+	info.L3.Text = "$" .. short(Game.income(p, iid)) .. "/s"
+	info.L3.TextColor3 = Color3.fromRGB(120, 255, 120)
 end
 local function renderAll(player, p)
 	local plot = plotOf(player)
@@ -221,21 +242,38 @@ local function showRoll(player, core, def, variant)
 end
 
 local Announce = M.Announce
-local function grant(player, p, core, def, variant)
-	local d = p.data
+local Mon = require(M.MonetizationConfig)
+local MessagingService = game:GetService("MessagingService")
+local GLOBAL_TIER = Config.Tier.Secret -- Secret+ rolls are announced in every server
+-- awards one rolled monster; returns the result entry for LastRoll
+local function grant(player, p, core, def, variant, special)
 	local iid, isNew = Game.addMonster(p, def, variant)
-	local s = Game.state(player)
-	if s then s:SetAttribute("LastRoll", Http:JSONEncode({ id = def.id, v = variant, new = isNew, n = d.Rolls, iid = iid })) end
 	if isNew and Game.stat(p, "discovery") > 0 then -- Discovery Streak
 		Game.addCash(p, math.max(100, Game.incomePerSec(p) * Game.stat(p, "discovery")))
 	end
 	local tier = Config.Tier[def.rarity]
 	if tier >= 5 or variant ~= "Normal" then Data.saveSoon(player) end
 	if tier >= 6 or variant == "Monstrous" then
-		Announce:FireAllClients(("%s rolled %s%s (%s)!"):format(player.DisplayName, variant ~= "Normal" and variant:upper() .. " " or "", def.name, def.rarity), def.rarity)
+		local text = ("%s rolled %s%s (%s)!"):format(player.DisplayName, variant ~= "Normal" and variant:upper() .. " " or "", def.name, def.rarity)
+		Announce:FireAllClients(text, def.rarity)
+		if tier >= GLOBAL_TIER then
+			task.spawn(pcall, MessagingService.PublishAsync, MessagingService, "RareRolls", { text = text, rarity = def.rarity, job = game.JobId })
+		end
 	end
 	showRoll(player, core, def, variant)
+	return { id = def.id, v = variant, new = isNew, iid = iid, special = special, tier = tier }
 end
+task.spawn(function() -- other servers' Secret+ rolls
+	pcall(MessagingService.SubscribeAsync, MessagingService, "RareRolls", function(msg)
+		local m = msg.Data
+		if typeof(m) == "table" and m.job ~= game.JobId and typeof(m.text) == "string" then
+			Announce:FireAllClients("🌐 " .. m.text, m.rarity)
+		end
+	end)
+end)
+
+-- one roll press: Triple Roll pass rolls up to 3; each roll may be Golden (every 10th), Rainbow (every 100th)
+-- or use a banked Lucky Roll (10x). Everything is decided here; the client only animates LastRoll.
 local function roll(player, core)
 	local p = Game.get(player)
 	if not p then return end
@@ -247,15 +285,35 @@ local function roll(player, core)
 	end
 	local die = Game.die(p)
 	if not d.Dice[die.id] then d.SelectedDie = "grassland" die = Game.die(p) end
-	local luck = Game.luck(p)
-	local def, variant = Config.roll(rng, luck, die.maxTier, die.id)
-	if not def then warn("Empty roll pool for die", die.id) return end
-	d.Rolls += 1
-	grant(player, p, core, def, variant)
-	if rng:NextNumber() < Game.stat(p, "double") and Game.count(d.Monsters) < Game.capacity(p) then -- Double Fortune
-		local def2, v2 = Config.roll(rng, luck, die.maxTier, die.id)
-		grant(player, p, core, def2, v2)
-		Game.notify(player, "Double Fortune! Bonus roll: " .. def2.name)
+	local results, biome = {}, Game.biomeBoost()
+	local function once(bonusRoll)
+		if Game.count(d.Monsters) >= Game.capacity(p) then return end
+		local extra, special = 1, nil
+		if not bonusRoll then
+			d.Rolls += 1
+			if d.Rolls % Mon.RAINBOW_EVERY == 0 then extra, special = Mon.RAINBOW_MULT, "rainbow"
+			elseif d.Rolls % Mon.GOLDEN_EVERY == 0 then extra, special = Mon.GOLDEN_MULT, "golden" end
+			if d.LuckyRolls > 0 and d.Settings.useLucky ~= false then
+				d.LuckyRolls -= 1
+				extra *= Mon.LUCKY_ROLL_MULT
+				special = special and (special .. "+lucky") or "lucky"
+			end
+		end
+		local def, variant = Config.roll(rng, Game.luck(p, extra), die.maxTier, die.id, biome)
+		if not def then warn("Empty roll pool for die", die.id) return end
+		table.insert(results, grant(player, p, core, def, variant, special))
+	end
+	for _ = 1, math.max(1, Mon.passStat(p.passes or {}, "multiRoll")) do once(false) end
+	if rng:NextNumber() < Game.stat(p, "double") then once(true) end -- Double Fortune
+	if #results == 0 then return end
+	-- LastRoll: the rarest result leads, the rest ride along
+	table.sort(results, function(a, b) return a.tier > b.tier end)
+	local s = Game.state(player)
+	if s then
+		local best = results[1]
+		best.n, best.more = d.Rolls, {}
+		for k = 2, #results do table.insert(best.more, { id = results[k].id, v = results[k].v, new = results[k].new }) end
+		s:SetAttribute("LastRoll", Http:JSONEncode(best))
 	end
 	Game.publish(player, p, "Index", "Monsters", "Progress")
 	Game.Changed:Fire(player)

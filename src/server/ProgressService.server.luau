@@ -1,6 +1,7 @@
 -- Progress extras, all server-authoritative: collection milestones and quests (auto-complete from server counters),
 -- the 7-day daily reward, timed events, fast travel (Portal Mastery), and the cosmetics / premium shop.
--- ProgressAction: ("daily") | ("travel", destination)
+-- ProgressAction: ("daily") | ("travel", destination) | ("code", text) | ("setting", "skipBelow" | "useLucky", value)
+-- Also runs the server-wide biomes (weather that boosts one element's roll weight).
 -- ShopAction: ("buy", cosmeticId) | ("equip", cosmeticId) | ("unequip", "title" | "aura") | ("premium", cosmeticId)
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -12,6 +13,7 @@ local P = require(M.ProgressConfig)
 local Config = require(M.MonsterConfig)
 local GearConfig = require(M.GearConfig)
 local Assets = require(M.AssetRegistry)
+local Weighted = require(M.Weighted)
 local Data = require(script.Parent.DataService)
 local Game = require(script.Parent.Game)
 local Guard = require(script.Parent.Guard)
@@ -95,7 +97,7 @@ local function refreshEvents()
 	if RS:GetAttribute("Events") == json then return end
 	RS:SetAttribute("Events", json)
 	for player, p in Data.all() do -- luck and income previews change with events
-		if not p.released then Game.publish(player, p) end
+		if not p.released then Game.publish(player, p) Game.BaseChanged:Fire(player) end
 	end
 end
 task.spawn(function()
@@ -139,13 +141,6 @@ end
 Data.onLoaded(function(player, p)
 	player.CharacterAdded:Connect(function(char) char:WaitForChild("Head", 5) dress(player, p) end)
 	if player.Character then dress(player, p) end
-	-- gamepass cosmetics are re-checked on join (ownership lives with Roblox, not in our save)
-	for _, c in P.Cosmetics do
-		if c.gamepass and not p.data.Cosmetics[c.id] then
-			local ok, owns = pcall(MPS.UserOwnsGamePassAsync, MPS, player.UserId, c.gamepass)
-			if ok and owns then p.data.Cosmetics[c.id] = true end
-		end
-	end
 	Game.publish(player, p, "Cosmetics")
 end)
 
@@ -171,8 +166,7 @@ M.ShopAction.OnServerInvoke = function(player, action, id)
 			d.Equipped[c.kind] = id
 		elseif action == "premium" then
 			if d.Cosmetics[id] then return false, "Already owned" end
-			if c.gamepass then MPS:PromptGamePassPurchase(player, c.gamepass) return true end
-			if c.product then MPS:PromptProductPurchase(player, c.product) return true end
+			if c.product then MPS:PromptProductPurchase(player, c.product) return true end -- granted in MonetizationService.ProcessReceipt
 			return false, "Not on sale yet"
 		else
 			return false, "Bad request"
@@ -182,31 +176,6 @@ M.ShopAction.OnServerInvoke = function(player, action, id)
 	dress(player, p)
 	return true
 end
--- paid items are fixed cosmetics: granted once per receipt, never randomized, never gameplay power
-MPS.PromptGamePassPurchaseFinished:Connect(function(player, passId, bought)
-	local p = Game.get(player)
-	if not (p and bought) then return end
-	for _, c in P.Cosmetics do if c.gamepass == passId then p.data.Cosmetics[c.id] = true end end
-	Game.publish(player, p, "Cosmetics")
-	Data.saveSoon(player)
-end)
-MPS.ProcessReceipt = function(info)
-	local player = Players:GetPlayerByUserId(info.PlayerId)
-	local p = player and Game.get(player)
-	if not p or not p.saveable then return Enum.ProductPurchaseDecision.NotProcessedYet end -- Roblox retries later
-	local d = p.data
-	if not d.Receipts[info.PurchaseId] then
-		local item
-		for _, c in P.Cosmetics do if c.product == info.ProductId then item = c end end
-		if not item then return Enum.ProductPurchaseDecision.NotProcessedYet end
-		d.Receipts[info.PurchaseId] = true
-		d.Cosmetics[item.id] = true
-		Game.publish(player, p, "Cosmetics")
-	end
-	Data.saveSoon(player)
-	return Enum.ProductPurchaseDecision.PurchaseGranted
-end
-
 -- DAILY REWARD
 local function claimDaily(player, p)
 	local d = p.data
@@ -259,17 +228,90 @@ local function travel(player, p, dest)
 	return true
 end
 
-M.ProgressAction.OnServerInvoke = function(player, action, a)
+-- CODES: once per player, case-insensitive, optional expiry
+local function redeem(player, p, text)
+	if typeof(text) ~= "string" or #text > 40 then return false, "Invalid code" end
+	local key = text:upper():gsub("%s", "")
+	local c = P.CodeByName[key]
+	if not c then return false, "Invalid code" end
+	if c.expires and os.time() >= c.expires then return false, "That code has expired" end
+	local d = p.data
+	if d.Codes[key] then return false, "Already redeemed" end
+	d.Codes[key] = true
+	local r, got = c.reward, {}
+	if r.luckyRolls then d.LuckyRolls += r.luckyRolls table.insert(got, r.luckyRolls .. " Lucky Rolls") end
+	if r.boost then
+		local b, now = d.Boosts[r.boost.effect], os.time()
+		local live = b and b.ends > now
+		d.Boosts[r.boost.effect] = { mult = math.max(r.boost.mult, live and b.mult or 1), ends = (live and b.ends or now) + r.boost.secs }
+		table.insert(got, r.boost.mult .. "x " .. r.boost.effect .. " for " .. r.boost.secs // 60 .. " min")
+	end
+	local more = grant(player, p, { cash = r.cash, mats = r.mats, gear = r.gear })
+	if more ~= "" then table.insert(got, more) end
+	Game.publish(player, p)
+	Data.saveSoon(player)
+	return true, table.concat(got, ", ")
+end
+
+local function setting(p, key, value)
+	if key == "skipBelow" then
+		local v = Guard.int(value, 0, #Config.Rarities)
+		if not v then return false, "Bad value" end
+		p.data.Settings.skipBelow = v
+	elseif key == "useLucky" then
+		if typeof(value) ~= "boolean" then return false, "Bad value" end
+		p.data.Settings.useLucky = value
+	else
+		return false, "Bad setting"
+	end
+	Game.publish(p.player, p)
+	return true
+end
+
+M.ProgressAction.OnServerInvoke = function(player, action, a, b)
 	local p = Game.get(player)
 	if not p then return false, "Still loading" end
 	if not Guard.rate(player, "progress", 0.5) then return false, "Too fast" end
 	if action == "daily" then return claimDaily(player, p) end
 	if action == "travel" then return travel(player, p, Guard.str(a)) end
+	if action == "code" then return redeem(player, p, a) end
+	if action == "setting" then return setting(p, a, b) end
 	return false, "Bad request"
 end
 
--- Studio QA: ServerStorage.DevStartEvent:Invoke("weekend_income", 600)
+-- BIOMES: published on ReplicatedStorage "Biome" (public); the roll pool reads Game.biome
+local biomeToken = 0
+local function setBiome(b, secs)
+	biomeToken += 1
+	Game.biome = b and { id = b.id, element = b.element, mult = b.mult, ends = os.time() + secs } or nil
+	RS:SetAttribute("Biome", Http:JSONEncode(Game.biome or {}))
+	if b then M.Announce:FireAllClients(b.icon .. " " .. b.name .. " has begun! " .. b.element .. " monsters are x" .. b.mult .. " more likely", "Epic") end
+	local mine = biomeToken
+	if b then task.delay(secs, function() if biomeToken == mine then setBiome(nil) end end) end
+end
+task.spawn(function()
+	while true do
+		task.wait(P.BIOME_EVERY)
+		if not Game.biome and rng:NextNumber() < P.BIOME_CHANCE then
+			local list = {}
+			for _, b in P.Biomes do table.insert(list, { b, b.weight }) end
+			local b = Weighted.pick(list, rng)
+			if b then setBiome(b, b.secs) end
+		end
+	end
+end)
+RS:SetAttribute("Biome", "{}")
+
+-- Studio QA: ServerStorage.DevStartEvent:Invoke("weekend_income", 600)  ServerStorage.DevStartBiome:Invoke("starfall", 120)
 if RunService:IsStudio() then
+	local bb = Instance.new("BindableFunction") bb.Name = "DevStartBiome"
+	bb.OnInvoke = function(id, secs)
+		local b = P.BiomeById[id]
+		if not b then return false end
+		setBiome(b, secs or b.secs)
+		return true
+	end
+	bb.Parent = game:GetService("ServerStorage")
 	local b = Instance.new("BindableFunction") b.Name = "DevStartEvent"
 	b.OnInvoke = function(id, secs)
 		if not P.EventById[id] then return false end
