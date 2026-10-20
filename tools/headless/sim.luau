@@ -404,6 +404,10 @@ R.run(1)
 summon.Triggered:Fire(A)
 R.run(0.1)
 check(p.data.LuckyRolls == lucky2, "Lucky Rolls saved when turned off")
+-- universal ROLL button: works anywhere, not just at the station
+R.run(1)
+local nU = Game.count(p.data.Monsters)
+check(select(1, R.invoke("RollAction", A, "roll")) == true and Game.count(p.data.Monsters) > nU, "ROLL button rolls from anywhere")
 -- codes
 R.run(0.6)
 local okc2, resc = R.invoke("ProgressAction", A, "code", "  release ")

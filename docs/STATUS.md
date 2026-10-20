@@ -79,7 +79,7 @@ Every row is pending a Studio playtest.
 | 1 | New player gets a valid saved profile | Implemented | Profile written with session lock; `DataStatus` goes `loading` → `ready` | Published-place DataStore |
 | 2 | Assigned an available plot | Implemented | Separate plots; third player gets `PlotStatus = "full"`, then the next plot that frees up | Real `Workspace.Hub.Plots` |
 | 3 | Starts with the Grassland Die | Implemented | New profile | DiceUI |
-| 4 | Rolls a server-generated monster | Implemented | Prompt roll, cooldown; ROLL button only near the station | Prompt, toast, ROLL button |
+| 4 | Rolls a server-generated monster | Implemented | Station prompt or the always-visible ROLL button (bottom centre, R key) from anywhere; cooldown | ROLL button, RollFX reveal |
 | 5 | In backpack + collection | Implemented | Instance + discovery + `LastRoll` | BackpackUI, IndexUI |
 | 6 | Places it in a slot | Implemented | Placement by instance id, all rejections | BaseUI on the real plot |
 | 7 | Generates money | Implemented | 10 s of income matches the rate | Pad labels, HUD |

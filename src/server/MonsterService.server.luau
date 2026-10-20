@@ -220,10 +220,12 @@ task.spawn(function()
 end)
 
 -- ROLLING (summon prompt; the server picks the result)
+-- the reveal model pops up on the summon station when rolled there, otherwise in front of the player
 local function showRoll(player, core, def, variant)
-	local m = MonsterModel.build(def, variant)
 	local root = player.Character and player.Character.PrimaryPart
-	local pos = core.Position + Vector3.new(0, 1, 0)
+	if not core and not root then return end
+	local m = MonsterModel.build(def, variant)
+	local pos = core and core.Position + Vector3.new(0, 1, 0) or root.Position + root.CFrame.LookVector * 10 - Vector3.new(0, 3, 0)
 	local look = root and Vector3.new(root.Position.X, pos.Y, root.Position.Z) or pos + Vector3.zAxis
 	if (look - pos).Magnitude < 0.1 then look = pos + Vector3.zAxis end
 	m:PivotTo(CFrame.lookAt(pos, look))
@@ -328,15 +330,14 @@ task.spawn(function() -- the summon station may be a placeholder made by HubFall
 	summonCore = summon
 	summon:WaitForChild("ProximityPrompt").Triggered:Connect(function(player) roll(player, summon) end)
 end)
--- HUD roll button and auto-roll (Auto Pickup node): both only work standing at the summon station,
--- and both go through roll(), so they share its cooldown and checks
+-- HUD roll button and auto-roll (Auto Pickup node / Auto Roll pass) work anywhere, like other RNG games;
+-- both go through roll(), so they share its cooldown and checks with the station prompt
 local auto = {} -- [Player] = true while auto-roll is on (session only)
 M.RollAction.OnServerInvoke = function(player, action, on)
 	local p = Game.get(player)
 	if not p then return false, "Still loading" end
 	if action == "roll" then
-		if not nearSummon(player) then return false, "Go to the Summon station to roll" end
-		roll(player, summonCore)
+		roll(player, nearSummon(player) and summonCore or nil)
 		return true
 	elseif action == "auto" then
 		if on == true and Game.stat(p, "autoroll") <= 0 then return false, "Unlock Auto Pickup in the Evolution Tree" end
@@ -349,9 +350,7 @@ Players.PlayerRemoving:Connect(function(player) auto[player] = nil end)
 task.spawn(function()
 	while true do
 		task.wait(0.25)
-		for player in auto do
-			if nearSummon(player) then roll(player, summonCore) end
-		end
+		for player in auto do roll(player, nearSummon(player) and summonCore or nil) end
 	end
 end)
 

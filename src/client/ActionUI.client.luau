@@ -1,4 +1,5 @@
--- Action buttons: ROLL / AUTO at the summon station, DASH (Q) once Longer Dash is owned, TRAVEL with Portal Mastery.
+-- Action buttons: ROLL (always on screen, bottom centre; R key too) and AUTO, DASH (Q) once Longer Dash is owned,
+-- TRAVEL with Portal Mastery.
 -- Rolling and travel are validated on the server; dashing is plain character movement (client-owned in Roblox).
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -16,9 +17,10 @@ local function btn(parent, str, size, pos, color)
 	return b
 end
 local gui = Instance.new("ScreenGui") gui.Name = "ActionUI" gui.ResetOnSpawn = false gui.Parent = player:WaitForChild("PlayerGui")
--- bottom-right column, above the mobile jump button
-local roll = btn(gui, "🎲 ROLL", UDim2.fromOffset(130, 56), UDim2.new(1, -142, 1, -260), Color3.fromRGB(230, 170, 40))
-local autoB = btn(gui, "AUTO: OFF", UDim2.fromOffset(130, 36), UDim2.new(1, -142, 1, -198), Color3.fromRGB(90, 90, 110))
+-- big ROLL button bottom centre (the genre's main button), AUTO next to it; the rest in a bottom-right column
+local roll = btn(gui, "🎲 ROLL", UDim2.fromOffset(200, 72), UDim2.new(0.5, -100, 1, -92), Color3.fromRGB(230, 170, 40))
+roll.TextColor3 = Color3.new(1, 1, 1)
+local autoB = btn(gui, "AUTO: OFF", UDim2.fromOffset(110, 44), UDim2.new(0.5, 110, 1, -78), Color3.fromRGB(90, 90, 110))
 local dash = btn(gui, "DASH (Q)", UDim2.fromOffset(130, 40), UDim2.new(1, -142, 1, -156), Color3.fromRGB(150, 80, 230))
 local travelB = btn(gui, "🌀 TRAVEL", UDim2.fromOffset(130, 40), UDim2.new(1, -142, 1, -310), Color3.fromRGB(40, 140, 200))
 local menu = Instance.new("Frame") menu.AnchorPoint = Vector2.new(1, 1) menu.Position = UDim2.new(1, -150, 1, -150) menu.Size = UDim2.fromOffset(180, 360)
@@ -30,18 +32,12 @@ msg.BackgroundTransparency = 1 msg.Font = Enum.Font.FredokaOne msg.TextScaled = 
 msg.TextStrokeTransparency = 0 msg.TextXAlignment = Enum.TextXAlignment.Right msg.Parent = gui
 local function say(t) msg.Text = t or "" task.delay(3, function() if msg.Text == t then msg.Text = "" end end) end
 
-local core
-local function nearSummon()
-	core = core or (workspace:FindFirstChild("Hub") and workspace.Hub:FindFirstChild("Shops") and workspace.Hub.Shops:FindFirstChild("SummonArea")
-		and workspace.Hub.Shops.SummonArea:FindFirstChild("SummonCore"))
-	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	return core and root and (root.Position - core.Position).Magnitude <= 25
-end
 local autoOn = false
-roll.MouseButton1Click:Connect(function()
+local function doRoll()
 	local ok, err = RollAction:InvokeServer("roll")
 	if not ok then say(err) end
-end)
+end
+roll.MouseButton1Click:Connect(doRoll)
 autoB.MouseButton1Click:Connect(function()
 	local ok, err = RollAction:InvokeServer("auto", not autoOn)
 	if ok then autoOn = not autoOn else say(err) end
@@ -68,7 +64,9 @@ local function doDash()
 end
 dash.MouseButton1Click:Connect(doDash)
 UIS.InputBegan:Connect(function(input, processed)
-	if not processed and input.KeyCode == Enum.KeyCode.Q then doDash() end
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.Q then doDash() end
+	if input.KeyCode == Enum.KeyCode.R then doRoll() end
 end)
 
 local DEST = {
@@ -86,13 +84,11 @@ for _, d in DEST do
 end
 travelB.MouseButton1Click:Connect(function() menu.Visible = not menu.Visible end)
 
--- show only what's usable (4x a second); the distance check is a convenience, the server re-checks
+-- show only what's usable (4x a second)
 task.spawn(function()
 	while true do
 		task.wait(0.25)
-		local near = nearSummon() == true
-		roll.Visible = near
-		autoB.Visible = near and state:GetAttribute("AutoRoll") == true
+		autoB.Visible = state:GetAttribute("AutoRoll") == true
 		dash.Visible = (state:GetAttribute("Dash") or 0) > 0
 		dash.BackgroundColor3 = os.clock() - lastDash < (state:GetAttribute("DashCooldown") or 3) and Color3.fromRGB(80, 70, 100) or Color3.fromRGB(150, 80, 230)
 		travelB.Visible = state:GetAttribute("Travel") == true
