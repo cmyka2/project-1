@@ -152,7 +152,23 @@ local function offline()
 end
 state:GetAttributeChangedSignal("OfflineEarnings"):Connect(offline)
 offline()
+-- confetti burst for quest / milestone rewards
+local TweenService = game:GetService("TweenService")
+local CONFETTI = { Color3.fromRGB(255, 90, 90), Color3.fromRGB(255, 220, 70), Color3.fromRGB(90, 220, 120), Color3.fromRGB(90, 160, 255), Color3.fromRGB(220, 110, 255) }
+local function confetti()
+	for _ = 1, 40 do
+		local f = Instance.new("Frame") f.Size = UDim2.fromOffset(math.random(6, 12), math.random(10, 18)) f.BorderSizePixel = 0
+		f.Position = UDim2.new(math.random(), 0, 0, -20) f.Rotation = math.random(0, 360) f.BackgroundColor3 = CONFETTI[math.random(1, #CONFETTI)]
+		f.Parent = gui
+		local t = math.random(15, 25) / 10
+		TweenService:Create(f, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Position = UDim2.new(f.Position.X.Scale + (math.random() - 0.5) * 0.2, 0, 1, 20), Rotation = f.Rotation + math.random(-360, 360) }):Play()
+		task.delay(t, function() f:Destroy() end)
+	end
+end
 state:GetAttributeChangedSignal("Notice"):Connect(function()
 	local n = decode(state:GetAttribute("Notice"))
-	if n.text then show(n.text, Color3.fromRGB(255, 200, 120), 4) end
+	if not n.text then return end
+	show(n.text, Color3.fromRGB(255, 200, 120), 4)
+	if n.text:find("Quest complete") or n.text:find("Milestone") then confetti() end
 end)

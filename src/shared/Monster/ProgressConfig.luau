@@ -75,6 +75,19 @@ function P.eventMult(events, effect: string): number
 	return m
 end
 
+-- PLAYTIME GIFTS: free gifts unlocked by minutes played this session (server-timed, claim each once per session).
+-- reward keys like daily days: cashSecs/cash, gems, luckyRolls, boost
+P.Gifts = {
+	{ mins = 2, reward = { cashSecs = 120, cash = 500 } },
+	{ mins = 5, reward = { gems = 3 } },
+	{ mins = 10, reward = { luckyRolls = 5 } },
+	{ mins = 15, reward = { cashSecs = 600, cash = 5000 } },
+	{ mins = 20, reward = { gems = 5 } },
+	{ mins = 30, reward = { boost = { effect = "luck", mult = 2, secs = 600 } } },
+	{ mins = 45, reward = { luckyRolls = 15 } },
+	{ mins = 60, reward = { gems = 15, luckyRolls = 25 } },
+}
+
 -- BIOMES: server-wide weather (Sol's RNG / Grow a Garden style). Every BIOME_EVERY seconds there's a BIOME_CHANCE
 -- one starts for secs; monsters of its element get mult x roll weight (still normalized, shown in the Index).
 -- weight = how often it is picked relative to the others.

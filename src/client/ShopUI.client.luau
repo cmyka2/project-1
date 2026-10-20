@@ -32,7 +32,7 @@ local function decode(s)
 end
 
 local gui = Instance.new("ScreenGui") gui.Name = "ShopUI" gui.ResetOnSpawn = false gui.Parent = player:WaitForChild("PlayerGui")
-local hud = btn(gui, "🍀 SHOP", UDim2.fromOffset(110, 36), UDim2.fromOffset(300, 12), Color3.fromRGB(40, 190, 90))
+local hud = btn(gui, "🍀 SHOP", UDim2.fromOffset(110, 36), UDim2.fromOffset(12, 54), Color3.fromRGB(40, 190, 90))
 local panel = Instance.new("Frame") panel.AnchorPoint = Vector2.new(0.5, 0.5) panel.Position = UDim2.fromScale(0.5, 0.5) panel.Size = UDim2.fromScale(0.9, 0.86)
 panel.BackgroundColor3 = Color3.fromRGB(24, 40, 30) panel.Visible = false panel.Parent = gui
 local lim = Instance.new("UISizeConstraint") lim.MaxSize = Vector2.new(1000, 700) lim.Parent = panel
@@ -195,6 +195,11 @@ refresh = function()
 			useLucky and Color3.fromRGB(40, 170, 90) or Color3.fromRGB(110, 90, 90))
 		lb.LayoutOrder = 2
 		lb.MouseButton1Click:Connect(function() ProgressAction:InvokeServer("setting", "useLucky", not useLucky) end)
+		local autoPlace = s.autoPlace ~= false
+		local ab = btn(body, "Auto-place new monsters: " .. (autoPlace and "ON" or "OFF"), UDim2.new(), UDim2.new(),
+			autoPlace and Color3.fromRGB(40, 170, 90) or Color3.fromRGB(110, 90, 90))
+		ab.LayoutOrder = 3
+		ab.MouseButton1Click:Connect(function() ProgressAction:InvokeServer("setting", "autoPlace", not autoPlace) end)
 	end
 end
 for _, a in { "Passes", "Settings", "LuckyRolls", "Restricted" } do

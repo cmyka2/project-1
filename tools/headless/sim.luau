@@ -388,6 +388,23 @@ local okH, errH = R.invoke("DiceAction", A, "buy", "glitch")
 check(not okH and tostring(errH):find("Rebirth 8"), "Glitch Die is rebirth-gated: " .. tostring(errH))
 p.data.Dice = savedDice
 
+print("onboarding/retention: auto-place, place best, playtime gifts")
+check(next(p.data.Placed) ~= nil, "first roll was auto-placed")
+R.run(0.3)
+check(select(1, R.invoke("PlaceMonster", A, "best")) == true, "place best")
+local bestInc, inc1 = 0, Game.income(p, p.data.Placed["1"])
+for id in p.data.Monsters do bestInc = math.max(bestInc, Game.income(p, id)) end
+check(math.abs(inc1 - bestInc) < 1e-9 and Game.count(p.data.Placed) == math.min(Game.count(p.data.Monsters), Game.slotCount(p)), "best earners fill every slot")
+p.sessionStart = os.time and (R.timeOffset + R.now()) or 0
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "gift", 1)) == false, "gift not ready at 0 min")
+p.sessionStart -= 125
+R.run(0.6)
+local okGf, gotGf = R.invoke("ProgressAction", A, "gift", 1)
+check(okGf, "2-minute gift claimed: " .. tostring(gotGf))
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "gift", 1)) == false, "gift only once per session")
+
 print("robux shop: passes, products, receipts, region policy, rolls")
 local Mon = R.req(R.RS.Monster.MonetizationConfig)
 local MPS = R.services.MarketplaceService

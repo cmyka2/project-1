@@ -55,6 +55,7 @@ function Game.luckMult(p)
 	local m = Game.boost(p, "luck")
 	if Game.serverLuck.ends > os.time() then m *= Game.serverLuck.mult end
 	if p.premium then m *= Mon.PREMIUM_LUCK end
+	if p.inGroup then m *= Mon.GROUP_LUCK end
 	if not p.restricted then m *= Mon.passStat(p.passes or {}, "luckMult") end
 	return m
 end
@@ -282,6 +283,9 @@ function Game.publish(player: Player, p, ...)
 	s:SetAttribute("OfflineCap", Game.offlineCap(p))
 	s:SetAttribute("LuckyRolls", d.LuckyRolls)
 	s:SetAttribute("Gems", d.Gems)
+	s:SetAttribute("InGroup", p.inGroup == true)
+	s:SetAttribute("SessionStart", p.sessionStart or 0)
+	s:SetAttribute("GiftsClaimed", Http:JSONEncode(p.gifts or {}))
 	s:SetAttribute("Friends", p.friends or 0)
 	s:SetAttribute("Settings", Http:JSONEncode(d.Settings))
 	s:SetAttribute("Passes", Http:JSONEncode(p.passes or {}))

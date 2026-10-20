@@ -1,6 +1,7 @@
 -- Progress extras, all server-authoritative: collection milestones and quests (auto-complete from server counters),
 -- the 7-day daily reward, timed events, fast travel (Portal Mastery), and the cosmetics / premium shop.
--- ProgressAction: ("daily") | ("travel", destination) | ("code", text) | ("setting", "skipBelow" | "useLucky", value)
+-- ProgressAction: ("daily") | ("gift", index) | ("travel", destination) | ("code", text)
+--                 | ("setting", "skipBelow" | "useLucky" | "autoPlace", value)
 -- Also runs the server-wide biomes (weather that boosts one element's roll weight).
 -- ShopAction: ("buy", cosmeticId) | ("equip", cosmeticId) | ("unequip", "title" | "aura") | ("premium", cosmeticId)
 local Players = game:GetService("Players")
@@ -259,14 +260,44 @@ local function setting(p, key, value)
 		local v = Guard.int(value, 0, #Config.Rarities)
 		if not v then return false, "Bad value" end
 		p.data.Settings.skipBelow = v
-	elseif key == "useLucky" then
+	elseif key == "useLucky" or key == "autoPlace" then
 		if typeof(value) ~= "boolean" then return false, "Bad value" end
-		p.data.Settings.useLucky = value
+		p.data.Settings[key] = value
 	else
 		return false, "Bad setting"
 	end
 	Game.publish(p.player, p)
 	return true
+end
+
+-- PLAYTIME GIFTS: unlocked by session minutes on the server clock
+Data.onLoaded(function(player, p)
+	p.sessionStart, p.gifts = os.time(), {}
+	Game.publish(player, p)
+end)
+local function claimGift(player, p, i)
+	local gift = Guard.int(i, 1, #P.Gifts) and P.Gifts[i]
+	if not gift then return false, "Unknown gift" end
+	if p.gifts[i] then return false, "Already claimed" end
+	if os.time() - (p.sessionStart or os.time()) < gift.mins * 60 then return false, "Not ready yet" end
+	p.gifts[i] = true
+	local r, d, got = gift.reward, p.data, {}
+	if r.cashSecs then
+		local cash = math.max(r.cash or 0, math.floor(Game.incomePerSec(p, true) * r.cashSecs))
+		Game.addCash(p, cash)
+		table.insert(got, "$" .. Game.short(cash))
+	end
+	if r.boost then
+		local b, now = d.Boosts[r.boost.effect], os.time()
+		local live = b and b.ends > now
+		d.Boosts[r.boost.effect] = { mult = math.max(r.boost.mult, live and b.mult or 1), ends = (live and b.ends or now) + r.boost.secs }
+		table.insert(got, r.boost.mult .. "x luck for " .. r.boost.secs // 60 .. " min")
+	end
+	local more = grant(player, p, { gems = r.gems, luckyRolls = r.luckyRolls })
+	if more ~= "" then table.insert(got, more) end
+	Game.publish(player, p)
+	Data.saveSoon(player)
+	return true, table.concat(got, ", ")
 end
 
 M.ProgressAction.OnServerInvoke = function(player, action, a, b)
@@ -276,6 +307,7 @@ M.ProgressAction.OnServerInvoke = function(player, action, a, b)
 	if action == "daily" then return claimDaily(player, p) end
 	if action == "travel" then return travel(player, p, Guard.str(a)) end
 	if action == "code" then return redeem(player, p, a) end
+	if action == "gift" then return claimGift(player, p, a) end
 	if action == "setting" then return setting(p, a, b) end
 	return false, "Bad request"
 end

@@ -62,6 +62,10 @@ end
 Data.onLoaded(function(player, p)
 	p.passes = p.passes or {}
 	p.premium = player.MembershipType == Enum.MembershipType.Premium
+	if Mon.GROUP_ID then
+		local okG, inG = pcall(player.IsInGroup, player, Mon.GROUP_ID)
+		p.inGroup = okG and inG or false
+	end
 	local ok, info = pcall(PolicyService.GetPolicyInfoForPlayerAsync, PolicyService, player)
 	p.restricted = ok and info and info.ArePaidRandomItemsRestricted == true or false
 	for _, pass in Mon.Passes do

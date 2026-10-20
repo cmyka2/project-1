@@ -253,6 +253,12 @@ local GLOBAL_TIER = Config.Tier.Secret -- Secret+ rolls are announced in every s
 local function grant(player, p, core, def, variant, special)
 	local mu = Traits.rollMutation(rng, Game.biome and Game.biome.id)
 	local iid, isNew = Game.addMonster(p, def, variant, mu)
+	-- auto-place into the first empty unlocked slot (new players earn from their very first roll; Settings.autoPlace)
+	if p.data.Settings.autoPlace ~= false and plotOf(player) then
+		for i = 1, Game.slotCount(p) do
+			if not p.data.Placed[tostring(i)] then p.data.Placed[tostring(i)] = iid p.autoPlaced = true break end
+		end
+	end
 	if isNew and Game.stat(p, "discovery") > 0 then -- Discovery Streak
 		Game.addCash(p, math.max(100, Game.incomePerSec(p) * Game.stat(p, "discovery")))
 	end
@@ -321,6 +327,11 @@ local function roll(player, core)
 		s:SetAttribute("LastRoll", Http:JSONEncode(best))
 	end
 	Game.publish(player, p, "Index", "Monsters", "Progress")
+	if p.autoPlaced then
+		p.autoPlaced = nil
+		Game.publish(player, p, "Placed")
+		renderAll(player, p)
+	end
 	Game.Changed:Fire(player)
 end
 local summonCore
@@ -362,6 +373,20 @@ M.PlaceMonster.OnServerInvoke = function(player, slot, iid)
 	local p = Game.get(player)
 	if not p then return false, "Still loading" end
 	if not Guard.rate(player, "place", 0.15) then return false, "Too fast" end
+	if slot == "best" then -- Place Best (the simulator "equip best"): top earners fill every unlocked slot
+		if not plotOf(player) then return false, "You don't have a plot" end
+		local list = {}
+		for id in p.data.Monsters do table.insert(list, { iid = id, inc = Game.income(p, id) }) end
+		table.sort(list, function(x, y) return x.inc > y.inc end)
+		local placed = {}
+		for i = 1, math.min(#list, Game.slotCount(p)) do placed[tostring(i)] = list[i].iid end
+		p.data.Placed = placed
+		Game.publish(player, p, "Placed", "Progress")
+		renderAll(player, p)
+		Game.Changed:Fire(player)
+		Data.saveSoon(player)
+		return true
+	end
 	slot = Guard.int(slot, 1, F.MAX_SLOTS)
 	if not slot then return false, "Bad slot" end
 	if slot > Game.slotCount(p) then return false, "Unlocks at Rebirth " .. F.slotRebirth(slot) end

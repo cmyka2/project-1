@@ -47,6 +47,8 @@ for _, p in Mon.Products do Mon.ProductById[p.id] = p end
 
 -- Roblox Premium members get a small luck bonus (common in the genre; set to 1 to turn it off)
 Mon.PREMIUM_LUCK = 1.1
+-- members of the game's Roblox group get a luck bonus (fill in GROUP_ID; nil = off)
+Mon.GROUP_ID, Mon.GROUP_LUCK = nil, 1.1
 -- every 10th roll is Golden (2x luck), every 100th is Rainbow (5x); free for everyone
 Mon.GOLDEN_EVERY, Mon.GOLDEN_MULT, Mon.RAINBOW_EVERY, Mon.RAINBOW_MULT = 10, 2, 100, 5
 

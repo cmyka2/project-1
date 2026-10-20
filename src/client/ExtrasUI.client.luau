@@ -146,10 +146,73 @@ PPS.PromptTriggered:Connect(function(prompt)
 	elseif prompt:FindFirstAncestor("Leaderboard") then open(ranks, refreshRanks)
 	elseif prompt:FindFirstAncestor("CosmeticShop") then open(shop, refreshShop) end
 end)
--- HUD row (top-left, below the Roblox menu buttons)
-local row = Instance.new("Frame") row.Position = UDim2.fromOffset(12, 12) row.Size = UDim2.fromOffset(300, 36) row.BackgroundTransparency = 1 row.Parent = gui
+-- PLAYTIME GIFTS (server-timed; the countdown uses the server clock)
+local gifts, gMsg, gList = panel("FREE GIFTS", Color3.fromRGB(40, 50, 80))
+local gg = Instance.new("UIGridLayout") gg.CellSize = UDim2.fromOffset(150, 110) gg.CellPadding = UDim2.fromOffset(8, 8)
+gg.HorizontalAlignment = Enum.HorizontalAlignment.Center gg.SortOrder = Enum.SortOrder.LayoutOrder gg.Parent = gList
+local function giftLabel(r)
+	local parts = {}
+	if r.cashSecs then table.insert(parts, "💵 Cash") end
+	if r.gems then table.insert(parts, "💎 " .. r.gems) end
+	if r.luckyRolls then table.insert(parts, "🍀 " .. r.luckyRolls .. " Lucky Rolls") end
+	if r.boost then table.insert(parts, "🧪 " .. r.boost.mult .. "x luck") end
+	return table.concat(parts, "  ")
+end
+local function giftState(i)
+	local claimed = decode(state:GetAttribute("GiftsClaimed"))
+	if claimed[i] or claimed[tostring(i)] then return "claimed", 0 end
+	local left = P.Gifts[i].mins * 60 - (workspace:GetServerTimeNow() - (state:GetAttribute("SessionStart") or 0))
+	return left <= 0 and "ready" or "wait", math.max(0, math.ceil(left))
+end
+local function refreshGifts()
+	clear(gList)
+	for i, g in P.Gifts do
+		local st, left = giftState(i)
+		local f = btn(gList, "", UDim2.new(), UDim2.new(), st == "ready" and Color3.fromRGB(60, 170, 80) or Color3.fromRGB(50, 56, 72))
+		f.LayoutOrder = i
+		text("TextLabel", f, g.mins .. " min", UDim2.new(1, -8, 0.28, 0), UDim2.fromOffset(4, 4))
+		text("TextLabel", f, giftLabel(g.reward), UDim2.new(1, -8, 0.36, 0), UDim2.new(0, 4, 0.32, 0), Color3.fromRGB(230, 230, 200)).TextWrapped = true
+		text("TextLabel", f, st == "claimed" and "✔" or st == "ready" and "CLAIM" or ("%d:%02d"):format(left // 60, left % 60),
+			UDim2.new(1, -8, 0.22, 0), UDim2.new(0, 4, 0.74, 0), Color3.fromRGB(150, 255, 150))
+		if st == "ready" then
+			f.MouseButton1Click:Connect(function()
+				local ok, res = ProgressAction:InvokeServer("gift", i)
+				gMsg.Text = ok and ("Gift: " .. res) or res
+			end)
+		end
+	end
+end
+state:GetAttributeChangedSignal("GiftsClaimed"):Connect(function() if gifts.Visible then refreshGifts() end end)
+
+-- HUD row (top-left, below the Roblox menu buttons); a red "!" marks anything claimable
+local row = Instance.new("Frame") row.Position = UDim2.fromOffset(12, 12) row.Size = UDim2.fromOffset(400, 36) row.BackgroundTransparency = 1 row.Parent = gui
 local rlay = Instance.new("UIListLayout") rlay.FillDirection = Enum.FillDirection.Horizontal rlay.Padding = UDim.new(0, 6) rlay.Parent = row
-for _, h in { { "DAILY", daily, refreshDaily, Color3.fromRGB(60, 160, 70) }, { "RANKS", ranks, refreshRanks, Color3.fromRGB(80, 80, 180) }, { "STYLE", shop, refreshShop, Color3.fromRGB(170, 70, 170) } } do
+local badges = {}
+for _, h in { { "DAILY", daily, refreshDaily, Color3.fromRGB(60, 160, 70) }, { "GIFTS", gifts, refreshGifts, Color3.fromRGB(230, 120, 40) },
+	{ "RANKS", ranks, refreshRanks, Color3.fromRGB(80, 80, 180) }, { "STYLE", shop, refreshShop, Color3.fromRGB(170, 70, 170) } } do
 	local b = btn(row, h[1], UDim2.fromOffset(90, 36), UDim2.new(), h[4])
 	b.MouseButton1Click:Connect(function() if h[2].Visible then h[2].Visible = false else open(h[2], h[3]) end end)
+	local dot = text("TextLabel", b, "!", UDim2.fromOffset(20, 20), UDim2.new(1, -12, 0, -8))
+	dot.BackgroundTransparency = 0 dot.BackgroundColor3 = Color3.fromRGB(230, 40, 40) dot.Visible = false
+	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+	badges[h[1]] = dot
 end
+-- invite friends (no reward: just the Roblox invite prompt)
+local SocialService = game:GetService("SocialService")
+local invite = btn(gui, "📨 INVITE", UDim2.fromOffset(110, 36), UDim2.fromOffset(128, 54), Color3.fromRGB(40, 130, 200))
+invite.MouseButton1Click:Connect(function()
+	local ok, can = pcall(SocialService.CanSendGameInviteAsync, SocialService, player)
+	if ok and can then pcall(SocialService.PromptGameInvite, SocialService, player) end
+end)
+-- badges + live gift countdowns, once a second
+task.spawn(function()
+	while true do
+		local d = decode(state:GetAttribute("Progress")).daily or { day = 0, last = -1 }
+		badges.DAILY.Visible = P.nextDaily(d, os.time()) ~= nil
+		local ready = false
+		for i in P.Gifts do if giftState(i) == "ready" then ready = true end end
+		badges.GIFTS.Visible = ready
+		if gifts.Visible then refreshGifts() end
+		task.wait(1)
+	end
+end)

@@ -110,6 +110,13 @@ local function setup()
 	end)
 	refreshPrompts()
 end
+-- PLACE BEST: the server fills every unlocked slot with your top earners
+local best = Instance.new("TextButton") best.Size = UDim2.fromOffset(120, 44) best.AnchorPoint = Vector2.new(0, 0.5) best.Position = UDim2.new(0, 12, 0.5, -112)
+best.BackgroundColor3 = Color3.fromRGB(230, 170, 40) best.Font = Enum.Font.FredokaOne best.TextScaled = true best.Text = "⭐ PLACE BEST"
+best.TextColor3 = Color3.new(1, 1, 1) best.TextStrokeTransparency = 0 best.Parent = gui
+Instance.new("UICorner", best)
+local bst = Instance.new("UIStroke", best) bst.Thickness = 3 bst.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+best.MouseButton1Click:Connect(function() PlaceMonster:InvokeServer("best") end)
 player:GetAttributeChangedSignal("PlotId"):Connect(setup)
 state:GetAttributeChangedSignal("Placed"):Connect(refreshPrompts)
 state:GetAttributeChangedSignal("Slots"):Connect(refreshPrompts)
