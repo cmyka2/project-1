@@ -83,11 +83,13 @@ local function refresh()
 		r.luck.Text = ("Luck x%s (base x%s)  •  up to %s"):format(("%.2f"):format(Luck.combine(die.luck, add)):gsub("%.?0+$", ""), die.luck, r.cap)
 		local prev = Dice.List[Dice.Index[die.id] - 1]
 		if prev and not owned[prev.id] then r.luck.Text ..= "  •  needs " .. prev.name end
+		local reb = state:GetAttribute("Rebirths") or 0
+		if die.rebirth and reb < die.rebirth and not owned[die.id] then r.luck.Text ..= "  •  Rebirth " .. die.rebirth end
 		if die.id == sel then
 			b.Text, b.BackgroundColor3 = "Equipped", Color3.fromRGB(90, 95, 110)
 		elseif owned[die.id] then
 			b.Text, b.BackgroundColor3 = "Equip", Color3.fromRGB(40, 130, 230)
-		elseif prev and not owned[prev.id] then
+		elseif (prev and not owned[prev.id]) or (die.rebirth and (state:GetAttribute("Rebirths") or 0) < die.rebirth) then
 			b.Text, b.BackgroundColor3 = "🔒 Locked", Color3.fromRGB(60, 60, 70)
 		else
 			b.Text = "Buy $" .. short(die.cost)

@@ -6,6 +6,7 @@ local Http = game:GetService("HttpService")
 local Config = require(RS:WaitForChild("Monster"):WaitForChild("MonsterConfig"))
 local Gear = require(RS.Monster:WaitForChild("GearConfig"))
 local F = require(RS.Monster:WaitForChild("Formulas"))
+local Traits = require(RS.Monster:WaitForChild("TraitConfig"))
 local Inv = RS.Monster:WaitForChild("InventoryAction")
 local BattleAction = RS.Monster:WaitForChild("BattleAction")
 local player = Players.LocalPlayer
@@ -35,7 +36,8 @@ local function decode(attr)
 end
 local function nameOf(m)
 	local def = Config.ById[m.id]
-	return (m.v ~= "Normal" and m.v:upper() .. " " or "") .. (def and def.name or m.id)
+	local mut = m.mu and Traits.MutationById[m.mu]
+	return (mut and mut.name .. " " or "") .. (m.v ~= "Normal" and m.v:upper() .. " " or "") .. (def and def.name or m.id)
 end
 
 local gui = Instance.new("ScreenGui") gui.Name = "BackpackUI" gui.ResetOnSpawn = false gui.Parent = player:WaitForChild("PlayerGui")
@@ -74,6 +76,9 @@ local countL = text("TextLabel", panel, "", UDim2.fromScale(0.2, 0.04), UDim2.fr
 local elemB = btn(panel, "", UDim2.fromScale(0.12, 0.06), UDim2.fromScale(0.63, 0.1), Color3.fromRGB(70, 90, 150))
 local roleB = btn(panel, "", UDim2.fromScale(0.12, 0.06), UDim2.fromScale(0.755, 0.1), Color3.fromRGB(70, 90, 150))
 local multiB = btn(panel, "Select", UDim2.fromScale(0.1, 0.06), UDim2.fromScale(0.88, 0.1), Color3.fromRGB(120, 90, 50))
+-- Fuse Machine (shown in select mode): 5 monsters of one rarity -> 1 random monster of the next rarity
+local fuseB = btn(panel, "", UDim2.fromScale(0.2, 0.05), UDim2.fromScale(0.78, 0.03), Color3.fromRGB(120, 70, 190))
+fuseB.Visible = false
 local grid = Instance.new("ScrollingFrame") grid.Position = UDim2.fromScale(0.02, 0.19) grid.Size = UDim2.fromScale(0.6, 0.79)
 grid.BackgroundTransparency = 1 grid.BorderSizePixel = 0 grid.CanvasSize = UDim2.new() grid.AutomaticCanvasSize = Enum.AutomaticSize.Y grid.ScrollBarThickness = 8 grid.Parent = panel
 local gl = Instance.new("UIGridLayout") gl.CellSize = UDim2.fromOffset(132, 92) gl.CellPadding = UDim2.fromOffset(8, 8)
@@ -120,6 +125,8 @@ local function refreshGrid()
 	roleB.Text = ROLES[roleI] or "All roles"
 	local n = 0 for iid in picked do if mons[iid] then n += 1 else picked[iid] = nil end end
 	multiB.Text = multi and ("Sell " .. n) or "Select"
+	fuseB.Visible = multi
+	fuseB.Text = "⚗️ Fuse Machine " .. n .. "/5"
 	for i, it in items do
 		if i > 300 then break end -- keep the grid light; search narrows it
 		local rc = Config.RarityById[it.def.rarity]
@@ -129,7 +136,8 @@ local function refreshGrid()
 		local hi = multi and picked[it.iid] or (not multi and it.iid == selected)
 		st.Color = hi and Color3.new(1, 1, 1) or rc.color
 		st.Thickness = hi and 5 or 3
-		text("TextLabel", b, nameOf(it.m), UDim2.new(1, -8, 0.32, 0), UDim2.fromOffset(4, 4), rc.color)
+		local mut = it.m.mu and Traits.MutationById[it.m.mu]
+		text("TextLabel", b, nameOf(it.m), UDim2.new(1, -8, 0.32, 0), UDim2.fromOffset(4, 4), mut and mut.color or rc.color)
 		text("TextLabel", b, "Lv " .. it.m.lvl .. (it.m.fr > 0 and ("  ★" .. it.m.fr) or ""), UDim2.new(1, -8, 0.22, 0), UDim2.new(0, 4, 0.36, 0))
 		text("TextLabel", b, "$" .. short(it.m.inc) .. "/s", UDim2.new(1, -8, 0.2, 0), UDim2.new(0, 4, 0.58, 0), Color3.fromRGB(120, 255, 120))
 		local tags = (it.m.lock and "🔒" or "") .. (it.m.fav and "⭐" or "") .. (onBase[it.iid] and "🏠" or "") .. (table.find(team, it.iid) and "⚔️" or "")
@@ -175,6 +183,10 @@ refreshDetail = function()
 	line(nameOf(m), rc.color, 32)
 	line(def.rarity .. " • " .. def.element .. " • " .. (m.role or "") .. (slot and ("  •  on slot " .. slot) or ""), rc.color)
 	line(Config.Lore[m.id] or "", Color3.fromRGB(190, 190, 210), 18)
+	local mut, trait = m.mu and Traits.MutationById[m.mu], m.tr and Traits.TraitById[m.tr]
+	if mut then line("Mutation: " .. mut.name .. " (x" .. mut.mult .. " income)", mut.color) end
+	line(trait and ("Trait: " .. trait.name .. " (x" .. trait.income .. " income, x" .. trait.combat .. " combat)") or "Trait: none",
+		trait and trait.color or Color3.fromRGB(170, 170, 180))
 	line("Level " .. m.lvl .. " / " .. F.MAX_LEVEL .. "   Fusion ★" .. m.fr .. " / " .. F.MAX_FUSION)
 	line("Income $" .. short(m.inc) .. "/s" .. (m.nxt and ("  →  $" .. short(m.nxt) .. "/s") or ""), Color3.fromRGB(120, 255, 120))
 	line(("HP %s   DMG %s   SPD %s"):format(short(m.hp or 0), short(m.dmg or 0), tostring(m.spd or 0)), Color3.fromRGB(255, 200, 200))
@@ -228,6 +240,14 @@ refreshDetail = function()
 		if ok and table.find(ids, selected) then selected = nil end
 		say(ok, res, ok and ("Sold for $" .. short(res)) or nil)
 	end
+	action("🎲 Reroll Trait (" .. Traits.TRAIT_COST .. " 💎, you have " .. (state:GetAttribute("Gems") or 0) .. ")", Color3.fromRGB(70, 120, 200), function()
+		local ok, res = Inv:InvokeServer("trait", selected)
+		say(ok, res, ok and ("New trait: " .. Traits.TraitById[res].name) or nil)
+	end)
+	-- trait odds, shown before spending Gems
+	local odds, parts = Traits.traitOdds(), {}
+	for _, t in Traits.Traits do table.insert(parts, t.name .. " " .. ("%.2f"):format(odds[t.id] * 100) .. "%") end
+	line(table.concat(parts, " • "), Color3.fromRGB(170, 170, 190), 30).TextWrapped = true
 	action("Sell  $" .. short(m.sell), Color3.fromRGB(200, 120, 40), function() sell({ selected }, "one") end)
 	local dupes = {}
 	for _, c in copies do if not mons[c.iid].fav and #dupes < 100 then table.insert(dupes, c.iid) end end
@@ -248,7 +268,7 @@ multiB.MouseButton1Click:Connect(function()
 	if not multi or #ids == 0 then
 		multi = not multi
 		table.clear(picked)
-		msg.Text = multi and "Tap monsters to pick them, then tap Sell" or ""
+		msg.Text = multi and "Tap monsters to pick them, then Sell them or put 5 of one rarity in the Fuse Machine" or ""
 		refreshGrid()
 		return
 	end
@@ -259,8 +279,16 @@ multiB.MouseButton1Click:Connect(function()
 	say(ok, res, ok and ("Sold " .. #ids .. " for $" .. short(res)) or nil)
 	refreshGrid()
 end)
+fuseB.MouseButton1Click:Connect(function()
+	local ids = {}
+	for iid in picked do table.insert(ids, iid) end
+	local ok, res = Inv:InvokeServer("upfuse", ids)
+	if ok then multi = false table.clear(picked) end
+	say(ok, res, ok and ("Fused into " .. (Config.ById[res.id] and Config.ById[res.id].name or res.id) .. "!") or nil)
+	refreshGrid()
+end)
 search:GetPropertyChangedSignal("Text"):Connect(function() if panel.Visible then refreshGrid() end end)
-for _, a in { "Monsters", "Placed", "Team", "Gear" } do
+for _, a in { "Monsters", "Placed", "Team", "Gear", "Gems" } do
 	state:GetAttributeChangedSignal(a):Connect(function()
 		if not panel.Visible then return end
 		refreshGrid()

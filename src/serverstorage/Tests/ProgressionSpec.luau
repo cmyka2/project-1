@@ -42,6 +42,7 @@ return function()
 	assert(F.slots(d.Rebirths) == slotsBefore + 1 and F.floors(d.Rebirths) == 2, "slot + floor 2")
 	assert(ap == 6 and d.AscensionPoints == 6, "milestone AP")
 	assert(R.requirement(0).stage == nil and R.requirement(3).stage == "grass3", "boss gate from rebirth 3")
+	assert(R.requirement(0).minTier == 3 and R.requirement(2).minTier == 4 and R.requirement(100).minTier == 12, "monster requirement climbs, capped")
 
 	-- v1 -> v2 migration: stacks become instances, placements and gear follow them, nothing is lost
 	local v1 = { Version = 1, Cash = 10, Rolls = 4, Discovered = { moss_goblin = { Normal = true } },
@@ -114,6 +115,8 @@ return function()
 	assert(has(P.activeEvents(hw.from + 10), "halloween_hunt") and not has(P.activeEvents(hw.to + 10), "halloween_hunt"))
 	assert(has(P.activeEvents(1792886400), "weekend_income") and not has(P.activeEvents(1792886400 + 2 * day), "weekend_income"), "2026-10-25 is a Sunday")
 	assert(has(P.activeEvents(0, { weekend_income = 10 }), "weekend_income"), "forced event")
+	local sat = 1792886400 - day -- Saturday 2026-10-24 00:00 UTC
+	assert(not has(P.activeEvents(sat + 17 * 3600), "lucky_hour") and has(P.activeEvents(sat + 18 * 3600 + 60), "lucky_hour"), "Lucky Hour 18:00 UTC Saturday only")
 	assert(P.eventMult({ hw }, "luck") == 1.5 and P.eventMult({ hw }, "income") == 1)
 	return "progression ok"
 end

@@ -1,5 +1,9 @@
 # What other RNG games do (and what we took)
 
+Two research passes.
+- **Pass 1:** the RNG genre in general (roll games, collect-and-hatch, farming).
+- **Pass 2:** the closer subgenre, "roll characters that earn money". You roll or spin for units, place them on your base, and they make cash per second.
+
 ## Scope and limits
 
 I can't play Roblox games or watch gameplay, so these notes don't cover anything only visible in-game. They come from guides, wikis, store listings and articles. That covered about 20 games, not 50:
@@ -9,7 +13,45 @@ I can't play Roblox games or watch gameplay, so these notes don't cover anything
 
 Prices and numbers below are snapshots from those sources and change often.
 
-## Patterns that keep showing up
+## Pass 2: roll-and-earn games
+
+**Games covered:**
+- **Spin / roll:** Spin a Baddie, Spin a Soccer Card, Spin a Kitty, Spin a Brainrot, Anime Dice (deeper this time), Become a Billionaire, Tycoon RNG
+- **Brainrot games:** Scroll a Brainrot, Steal a Brainrot (again), Plants vs Brainrots, Escape Tsunami for Brainrots, Steal a Baddie, Be a Lucky Block, Survive Lava for Brainrots
+- **Card / RNG games:** Anime Card Farm, Anime Card Collection, Unknown RNG
+
+That's about 35 games across both passes. Most guide sites blocked direct page fetches from this session, so details come from search summaries. They often disagreed on exact numbers.
+
+### What they do well
+
+| Idea | Seen in | Taken? |
+|---|---|---|
+| **Mutations multiply income**; the rarer the mutation, the bigger the multiplier, and weather/events cause special ones | Spin a Soccer Card (Venomous, Blessed, Rainbow, Divine…), Anime Card Farm (Golden 1.5x … Unknow 90x), Grow a Garden / Plants vs Brainrots (weather mutations), Steal a Brainrot (event traits + mutations stack) | **Yes.** <ul><li>Natural Golden 1.5x (1 in 50), Diamond 2x (1 in 250), Rainbow 4x (1 in 1,500)</li><li>8 biome mutations (Wet, Scorched, Shocked, Blooming, Sandy, Auroral, Bloodrot, Starfallen up to 5x) that only roll during their biome</li></ul> |
+| **Rerollable traits / grades as the endgame income chase** | Anime Dice (grades D 1.1x → Z+ 25x for 1 Gem; traits Money I–III, Samurai 3x, Shogun 5x, Monarch 8x, Transcendent 15x) | **Yes:** **Traits** (spec's TraitIds) rerolled for **1 Gem**. Money I–III, Power I–III, Samurai 2x, Shogun 3x, Monarch 5x, Transcendent 10x (income and combat). Odds shown before rerolling. |
+| **A second soft currency** for rerolls | Anime Dice gems, Spin a Baddie gems | **Yes:** **Gems** from daily rewards, quests, battle wins (+1), boss first clears (+10) and codes. Not sold for Robux (rerolls are random, so that would be another paid random item). |
+| **Rebirth requires owning rare characters, not just cash** | Steal a Brainrot (2 Rares for rebirth 1, specific Brainrots later), Spin a Soccer Card (specific cards for Rebirth 4) | **Yes.** Rebirth also needs **2 monsters at a rarity bar** that climbs one tier every 2 rebirths. They are kept, not consumed. |
+| **Rebirth unlocks better rolls / higher rarities** | Spin a Baddie (Secret at rebirth 14, Godly at 16…), Spin a Soccer Card packs gated by rebirth | **Yes:** Heaven Die needs Rebirth 2, Cosmic Rebirth 4, Glitch Rebirth 8. |
+| **Fuse junk into rarer characters** | Be a Lucky Block fuse machine (4 → higher rarity), Survive Lava for Brainrots (duplicates → rarer variants) | **Yes:** **Fuse Machine**, 5 monsters of one rarity → 1 random monster of the next rarity (Backpack → Select → Fuse Machine). |
+| **Friends in server boost income** | Steal a Brainrot (+10% playing with friends) | **Yes:** +10% live income per friend in the server, up to +50%, shown on the HUD. |
+| **Scheduled event slot** | Steal a Brainrot "admin abuse" (Saturdays, Taco Tuesday) | **Yes:** **Lucky Hour**, 3x luck Saturdays 18:00–19:00 UTC, plus weekend double income. |
+| **Money popping off your units** | Spin a Baddie (walk over the green pad), tycoons generally | **Partly:** floating **+$** popups over your placed monsters every 3 s, plus name/level/income tags. We kept automatic collection instead of walk-to-collect pads (see below). |
+| **Offline income** | Spin a Kitty, Become a Billionaire, Scroll a Brainrot, Anime Dice | Already had it (8 h cap, extendable). |
+| **Per-unit leveling** | Escape Tsunami for Brainrots (1.25x per level), Anime Dice pad upgrades | Already had it (monster upgrades). |
+| **Spending order: fill pedestals → money upgrades → luck → better dice** | Anime Dice guides | Our quest chain already walks players through this order. |
+
+### Not taken from pass 2
+
+| Idea | Why not |
+|---|---|
+| **Walk-over collect pads + "Auto Collect" pass** (Spin a Baddie, tycoons) | It adds friction to the core loop and would change how income works everywhere. Easy to add later if you want that monetization hook. |
+| **Stealing / base locks** (Steal a Brainrot) | The spec forbids other players touching your base. |
+| **Conveyor of buyable characters** (Steal a Brainrot) | A whole second acquisition loop. Worth doing as its own feature. |
+| **Bank to keep cards through rebirth** (Spin a Soccer Card) | Our rebirth already keeps every monster. |
+| **Selling Gems for Robux** | Gems feed random rerolls, so selling them would be more paid random items. |
+
+## Pass 1: general RNG patterns
+
+### Patterns that keep showing up
 
 | Pattern | Seen in | What it is | In Monster Roll |
 |---|---|---|---|
@@ -57,6 +99,37 @@ This cloud session couldn't open Roblox's documentation site directly; the rules
 Spec §3.4 originally said the premium shop must never sell randomized paid rewards or let purchases affect competitive results. Selling luck is a deliberate change requested by the project owner. Leaderboards stay as they are: earnings, rebirths, unique monsters and battle progress.
 
 ## Sources
+
+### Pass 2
+
+- [Spin a Soccer Card beginner's guide (Deltia's)](https://deltiasgaming.com/spin-a-soccer-card-a-beginners-guide-roblox/)
+- [Spin a Soccer Card wiki](https://spinasoccercard.wiki/)
+- [Spin a Soccer Card (Rolimons)](https://www.rolimons.com/game/112490729816320)
+- [Spin a Soccer Card April 2026 update (earnaldo)](https://earnaldo.com/blog/spin-a-soccer-card-update-april-2026)
+- [Spin a Baddie wiki](https://spin-a-baddie.fandom.com/wiki/Spin_a_baddie_Wiki)
+- [Spin a Baddie money guide (Deltia's)](https://deltiasgaming.com/roblox-spin-a-baddie-money-guide/)
+- [Spin a Baddie rebirth (Pocket Tactics)](https://www.pockettactics.com/spin-a-baddie-rebirth)
+- [Spin a Baddie pets (Pocket Tactics)](https://www.pockettactics.com/spin-a-baddie-pets)
+- [Spin a Brainrot (Rolimons)](https://www.rolimons.com/game/112371649846345)
+- [Spin a Kitty codes and overview (progameguides)](https://progameguides.com/roblox/spin-a-kitty-codes/)
+- [Anime Dice income guide (allthings.how)](https://allthings.how/anime-dice-on-roblox-how-to-build-income-fast/)
+- [Anime Dice traits tier list (allthings.how)](https://allthings.how/anime-dice-traits-tier-list/)
+- [Anime Dice grades (bloxodes)](https://bloxodes.com/articles/anime-dice-grades-guide-boost-your-units-income)
+- [Become a Billionaire codes (robloxden)](https://robloxden.com/game-codes/become-a-billionaire)
+- [Tycoon RNG (earnaldo)](https://earnaldo.com/blog/tycoon-rng)
+- [Scroll a Brainrot guide](https://ofzenandcomputing.com/how-to-play-scroll-a-brainrot/)
+- [Plants vs Brainrots beginner's guide (Sportskeeda)](https://www.sportskeeda.com/roblox-news/plants-vs-brainrots-a-beginner-s-guide)
+- [Plants vs Brainrots mutations (Deltia's)](https://deltiasgaming.com/?p=356749)
+- [Escape Tsunami for Brainrots base upgrades (allthings.how)](https://allthings.how/escape-tsunami-for-brainrots-base-upgrades-how-slots-floors-and-rebirths-really-fit-together/)
+- [Escape Tsunami for Brainrots rebirths (allthings.how)](https://allthings.how/how-rebirth-works-in-escape-tsunami-for-brainrots-all-20-levels/)
+- [Anime Card Farm mutations (progameguides)](https://progameguides.com/roblox/anime-card-farm-mutations-guide/)
+- [Anime Card Collection mutations (progameguides)](https://progameguides.com/roblox/anime-card-collection-mutations-guide/)
+- [Steal a Brainrot traits (Deltia's)](https://deltiasgaming.com/?p=306346)
+- [Steal a Brainrot admin abuse (Sportskeeda)](https://www.sportskeeda.com/roblox-news/when-admin-abuse-steal-brainrot-august-12-2025)
+- [Be a Lucky Block fuse machine](https://findingdulcinea.com/be-a-lucky-block-fuse-machine-roblox-guide/)
+- [Survive Lava for Brainrots fuse machine](https://www.rosenberryrooms.com/survive-lava-for-brainrots-fuse-machine-updater/)
+
+### Pass 1
 
 - [Sol's RNG luck guide (itemlevel)](https://itemlevel.net/sols-rng-how-to-get-more-luck-guide/)
 - [Sol's RNG luck (progameguides)](https://progameguides.com/roblox/how-to-get-more-luck-in-roblox-sols-rng/)

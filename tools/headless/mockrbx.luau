@@ -415,7 +415,7 @@ local function module(parent, name, path)
 end
 local mon = newInst("Folder", "Monster")
 mon.Parent = RS
-for _, n in { "MonsterConfig", "Weighted", "LuckConfig", "Formulas", "RebirthConfig", "GearConfig", "BattleConfig", "DiceConfig", "SkillTree", "AssetRegistry", "MonsterModel", "ProgressConfig", "MonetizationConfig" } do
+for _, n in { "MonsterConfig", "Weighted", "LuckConfig", "Formulas", "RebirthConfig", "GearConfig", "BattleConfig", "DiceConfig", "SkillTree", "AssetRegistry", "MonsterModel", "ProgressConfig", "MonetizationConfig", "TraitConfig" } do
 	module(mon, n, ROOT .. "shared/Monster/" .. n .. ".luau")
 end
 for _, n in { "PlaceMonster", "BuySkill", "Rebirth", "DiceAction", "ChestAction", "BattleAction", "InventoryAction", "RollAction", "ProgressAction", "ShopAction", "RobuxAction" } do

@@ -60,6 +60,18 @@ return function()
 		assert(math.abs(s - 1) < 1e-9, c.id .. " odds must sum to 1")
 		for _ = 1, 2000 do local r, t = G.roll(c, rng) assert(c.weights[r] and G.TypeById[t], c.id .. " rolled " .. tostring(r)) end
 	end
+	-- mutations: biome ones only during their biome, natural ones rare; trait odds sum to 1
+	local T = require(game.ReplicatedStorage.Monster.TraitConfig)
+	local mr, star, nat = Random.new(11), 0, 0
+	for _ = 1, 20000 do
+		local m = T.rollMutation(mr, "starfall")
+		if m == "starfallen" then star += 1 elseif m then nat += 1 end
+		local n = T.rollMutation(mr, nil)
+		assert(not n or not T.MutationById[n].biome, "biome mutation outside its biome")
+	end
+	assert(math.abs(star / 20000 - T.MutationById.starfallen.chance) < 0.01, "starfallen rate " .. star / 20000)
+	local tsum = 0 for _, q in T.traitOdds() do tsum += q end
+	assert(math.abs(tsum - 1) < 1e-9, "trait odds sum to 1")
 	-- chest luck shifts drops toward rarer gear and stays normalized; gear levels scale power
 	local wood = G.ChestById.wooden
 	local base, lucky = G.odds(wood), G.odds(wood, 0.75)

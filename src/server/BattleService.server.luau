@@ -47,11 +47,14 @@ local function settle(player, p, b)
 			d.Materials[mat] = (d.Materials[mat] or 0) + n
 			table.insert(rewards, n .. " " .. GearConfig.MaterialById[mat].name)
 		end
+		d.Gems += 1
+		table.insert(rewards, "1 Gem")
 		Game.bump(p, "wins")
 		if stage.boss then Game.bump(p, "bosses") end
 		if not d.BattleProgress[stage.id] then
 			d.BattleProgress[stage.id] = true
 			table.insert(rewards, "Stage cleared!")
+			if stage.boss then d.Gems += 10 table.insert(rewards, "10 Gems") end
 			if stage.firstClearGear then
 				local t = GearConfig.Types[rng:NextInteger(1, #GearConfig.Types)].id
 				if Game.addGear(p, stage.firstClearGear, t) then

@@ -11,6 +11,7 @@ local M = RS:WaitForChild("Monster")
 local Config = require(M:WaitForChild("MonsterConfig"))
 local P = require(M:WaitForChild("ProgressConfig"))
 local Assets = require(M:WaitForChild("AssetRegistry"))
+local Traits = require(M:WaitForChild("TraitConfig"))
 local player = Players.LocalPlayer
 local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
 
@@ -76,9 +77,11 @@ local function reveal(r)
 	local rar, var = Config.RarityById[def.rarity], Config.VariantById[r.v]
 	local tier = Config.Tier[def.rarity]
 	local color = r.v ~= "Normal" and var.color or rar.color
-	local title = (r.v ~= "Normal" and r.v:upper() .. " " or "") .. def.name
+	local mut = r.mu and Traits.MutationById[r.mu]
+	local title = (mut and mut.name .. " " or "") .. (r.v ~= "Normal" and r.v:upper() .. " " or "") .. def.name
 	local specials = {}
 	for key, label in SPECIAL do if r.special and r.special:find(key) then table.insert(specials, label) end end
+	if mut then table.insert(specials, "🧬 " .. mut.name:upper() .. " MUTATION x" .. mut.mult) end
 	local extra = r.more and #r.more > 0 and ("  +" .. #r.more .. " more") or ""
 	local skip = decode(state:GetAttribute("Settings")).skipBelow or 0
 	if tier < skip then -- quick toast

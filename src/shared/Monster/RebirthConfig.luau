@@ -10,8 +10,11 @@ function Rebirth.cost(rebirths: number)
 	return math.floor(25000 * 3 ^ rebirths)
 end
 -- stage = battle stage that must be cleared first (nil = none)
+-- count monsters of at least tier minTier must be owned (kept, not consumed), like Steal a Brainrot's rebirths:
+-- 2 Rares for the first rebirth, then the bar climbs one rarity every 2 rebirths (MonsterConfig.Rarities tiers)
 function Rebirth.requirement(rebirths: number)
-	return { cost = Rebirth.cost(rebirths), stage = rebirths >= 3 and "grass3" or nil }
+	return { cost = Rebirth.cost(rebirths), stage = rebirths >= 3 and "grass3" or nil,
+		minTier = math.min(12, 3 + rebirths // 2), count = 2 }
 end
 -- AP for reaching rebirth n: 1, plus 5 on each floor milestone
 function Rebirth.points(n: number)

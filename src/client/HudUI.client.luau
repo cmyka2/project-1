@@ -27,7 +27,7 @@ local function decode(s)
 end
 
 local gui = Instance.new("ScreenGui") gui.Name = "HudUI" gui.ResetOnSpawn = false gui.Parent = player:WaitForChild("PlayerGui")
-local cash = text(gui, UDim2.fromOffset(320, 40), UDim2.new(0.5, 0, 0, 6), Color3.fromRGB(120, 255, 120))
+local cash = text(gui, UDim2.fromOffset(420, 40), UDim2.new(0.5, 0, 0, 6), Color3.fromRGB(120, 255, 120))
 local region = text(gui, UDim2.fromOffset(320, 22), UDim2.new(0.5, 0, 0, 46), Color3.fromRGB(200, 230, 255))
 local status = text(gui, UDim2.fromOffset(520, 26), UDim2.new(0.5, 0, 0, 70), Color3.fromRGB(255, 220, 120))
 local events = text(gui, UDim2.fromOffset(520, 24), UDim2.new(0.5, 0, 0, 96), Color3.fromRGB(255, 170, 255))
@@ -82,10 +82,11 @@ end)
 
 local state = player:WaitForChild("PlayerGui"):WaitForChild("State")
 local function refreshCash()
-	cash.Text = "$" .. short(state:GetAttribute("Cash") or 0) .. "   (+" .. short(state:GetAttribute("CashPerSec") or 0) .. "/s)"
+	cash.Text = "$" .. short(state:GetAttribute("Cash") or 0) .. "   (+" .. short(state:GetAttribute("CashPerSec") or 0) .. "/s)   💎 " .. (state:GetAttribute("Gems") or 0)
 end
 state:GetAttributeChangedSignal("Cash"):Connect(refreshCash)
 state:GetAttributeChangedSignal("CashPerSec"):Connect(refreshCash)
+state:GetAttributeChangedSignal("Gems"):Connect(refreshCash)
 refreshCash()
 -- current region = the furthest battle region you can enter
 local function refreshRegion()
@@ -126,6 +127,8 @@ task.spawn(function()
 		local parts, now = {}, os.time()
 		local lucky = state:GetAttribute("LuckyRolls") or 0
 		if lucky > 0 then table.insert(parts, "🍀 Lucky Rolls: " .. lucky) end
+		local friends = state:GetAttribute("Friends") or 0
+		if friends > 0 then table.insert(parts, "👥 +" .. math.min(50, friends * 10) .. "% income (" .. friends .. " friends)") end
 		local rolls = decode(state:GetAttribute("Progress")).rolls or 0
 		local toG, toR = Mon.GOLDEN_EVERY - rolls % Mon.GOLDEN_EVERY, Mon.RAINBOW_EVERY - rolls % Mon.RAINBOW_EVERY
 		table.insert(parts, toR <= toG and ("🌈 Rainbow in " .. toR) or ("✨ Golden in " .. toG))

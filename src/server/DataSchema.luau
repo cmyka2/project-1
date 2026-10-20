@@ -7,7 +7,7 @@ S.MIGRATE_CAP = 300 -- v1 stack counts become at most this many monster instance
 --[[ v3 profile
 	Version, Cash, LifetimeEarnings, Rebirths, AscensionPoints, Rolls, LastOnline (server os.time of last save)
 	Dice = { [dieId] = true }, SelectedDie
-	Monsters = { [iid] = { id, v (variant), lvl, fr (fusion rank), lock?, fav?, t (created) } }, NextMonsterId
+	Monsters = { [iid] = { id, v (variant), lvl, fr (fusion rank), mu? (mutation), tr? (trait), lock?, fav?, t (created) } }, NextMonsterId
 	Placed = { [slot "1".."40"] = iid }
 	Gear = { [uid] = { r (rarity), t (type), lvl, sec? = { stat, v }, m (wearer iid)? } }, NextGearId
 	Skills = { [nodeId] = rank } (cash), SkillSpent, Ascension = { [nodeId] = rank } (AP)
@@ -16,7 +16,7 @@ S.MIGRATE_CAP = 300 -- v1 stack counts become at most this many monster instance
 	Stats = { [counter] = n } (quest/leaderboard counters), Quests = { [questId] = true } (claimed),
 	Milestones = { [milestoneId] = true }, Daily = { day, last (UTC day number) }, Boosts = { [effect] = { mult, ends } }
 	Cosmetics = { [cosmeticId] = true }, Equipped = { title?, aura? }, Receipts = { [purchaseId] = true }
-	LuckyRolls (banked 10x-luck rolls), Codes = { [CODE] = true }, Settings = { skipBelow?, useLucky? }
+	Gems (trait rerolls), LuckyRolls (banked 10x-luck rolls), Codes = { [CODE] = true }, Settings = { skipBelow?, useLucky? }
 	_lock = { job, t } while a server holds the session
 ]]
 function S.default()
@@ -26,7 +26,7 @@ function S.default()
 		Monsters = {}, NextMonsterId = 1, Placed = {}, Gear = {}, NextGearId = 1,
 		Skills = { start = 1 }, SkillSpent = 0, Ascension = {}, Discovered = {}, BattleProgress = {}, BattleTeams = {}, ActiveTeam = 1,
 		Materials = {}, Stats = {}, Quests = {}, Milestones = {}, Daily = { day = 0, last = -1 }, Boosts = {},
-		Cosmetics = {}, Equipped = {}, Receipts = {}, LuckyRolls = 0, Codes = {}, Settings = {},
+		Cosmetics = {}, Equipped = {}, Receipts = {}, LuckyRolls = 0, Gems = 0, Codes = {}, Settings = {},
 	}
 end
 

@@ -14,6 +14,7 @@ local DiceConfig = require(M.DiceConfig)
 local MonsterModel = require(M.MonsterModel)
 local Assets = require(M.AssetRegistry)
 local F = require(M.Formulas)
+local Traits = require(M.TraitConfig)
 local Data = require(script.Parent.DataService)
 local Game = require(script.Parent.Game)
 local Guard = require(script.Parent.Guard)
@@ -161,9 +162,10 @@ local function renderSlot(player, p, i)
 		info.Parent = m
 	end
 	local rar = def and Config.RarityById[def.rarity]
-	info.L1.Text = (inst.v ~= "Normal" and inst.v:upper() .. " " or "") .. (def and def.name or inst.id)
-	info.L1.TextColor3 = rar and rar.color or Color3.new(1, 1, 1)
-	info.L2.Text = (def and def.rarity or "?") .. "  •  Lv " .. inst.lvl .. (inst.fr > 0 and ("  ★" .. inst.fr) or "")
+	local mut, trait = inst.mu and Traits.MutationById[inst.mu], inst.tr and Traits.TraitById[inst.tr]
+	info.L1.Text = (mut and mut.name .. " " or "") .. (inst.v ~= "Normal" and inst.v:upper() .. " " or "") .. (def and def.name or inst.id)
+	info.L1.TextColor3 = mut and mut.color or (rar and rar.color or Color3.new(1, 1, 1))
+	info.L2.Text = (def and def.rarity or "?") .. "  •  Lv " .. inst.lvl .. (inst.fr > 0 and ("  ★" .. inst.fr) or "") .. (trait and ("  •  " .. trait.name) or "")
 	info.L2.TextColor3 = Color3.fromRGB(230, 230, 240)
 	info.L3.Text = "$" .. short(Game.income(p, iid)) .. "/s"
 	info.L3.TextColor3 = Color3.fromRGB(120, 255, 120)
@@ -249,7 +251,8 @@ local MessagingService = game:GetService("MessagingService")
 local GLOBAL_TIER = Config.Tier.Secret -- Secret+ rolls are announced in every server
 -- awards one rolled monster; returns the result entry for LastRoll
 local function grant(player, p, core, def, variant, special)
-	local iid, isNew = Game.addMonster(p, def, variant)
+	local mu = Traits.rollMutation(rng, Game.biome and Game.biome.id)
+	local iid, isNew = Game.addMonster(p, def, variant, mu)
 	if isNew and Game.stat(p, "discovery") > 0 then -- Discovery Streak
 		Game.addCash(p, math.max(100, Game.incomePerSec(p) * Game.stat(p, "discovery")))
 	end
@@ -263,7 +266,7 @@ local function grant(player, p, core, def, variant, special)
 		end
 	end
 	showRoll(player, core, def, variant)
-	return { id = def.id, v = variant, new = isNew, iid = iid, special = special, tier = tier }
+	return { id = def.id, v = variant, mu = mu, new = isNew, iid = iid, special = special, tier = tier }
 end
 task.spawn(function() -- other servers' Secret+ rolls
 	pcall(MessagingService.SubscribeAsync, MessagingService, "RareRolls", function(msg)
@@ -314,7 +317,7 @@ local function roll(player, core)
 	if s then
 		local best = results[1]
 		best.n, best.more = d.Rolls, {}
-		for k = 2, #results do table.insert(best.more, { id = results[k].id, v = results[k].v, new = results[k].new }) end
+		for k = 2, #results do table.insert(best.more, { id = results[k].id, v = results[k].v, mu = results[k].mu, new = results[k].new }) end
 		s:SetAttribute("LastRoll", Http:JSONEncode(best))
 	end
 	Game.publish(player, p, "Index", "Monsters", "Progress")
@@ -382,7 +385,8 @@ M.PlaceMonster.OnServerInvoke = function(player, slot, iid)
 	return true
 end
 
--- INVENTORY: upgrade | lock | fav | sell | fuse
+-- INVENTORY: upgrade | lock | fav | sell | fuse | trait (reroll, Gems) | upfuse (Fuse Machine: 5 of a rarity -> next rarity)
+local UPFUSE_COUNT = 5
 local function owned(p, iid) iid = Guard.str(iid) return iid and p.data.Monsters[iid], iid end
 local function nameOf(inst)
 	local def = Config.ById[inst.id]
@@ -462,6 +466,43 @@ M.InventoryAction.OnServerInvoke = function(player, action, a, b)
 		if sk then renderSlot(player, p, tonumber(sk)) end
 		Data.saveSoon(player)
 		return true
+	elseif action == "trait" then -- reroll the trait for Gems (Anime Dice style)
+		local inst = owned(p, a)
+		if not inst then return false, "You don't own that monster" end
+		if d.Gems < Traits.TRAIT_COST then return false, "Need " .. Traits.TRAIT_COST .. " Gem" end
+		d.Gems -= Traits.TRAIT_COST
+		inst.tr = Traits.rollTrait(rng)
+		Game.publish(player, p, "Monsters")
+		Game.BaseChanged:Fire(player)
+		Data.saveSoon(player)
+		return true, inst.tr
+	elseif action == "upfuse" then -- Fuse Machine: 5 monsters of one rarity become 1 random monster of the next rarity
+		local ids = Guard.ids(a, UPFUSE_COUNT)
+		if not ids or #ids ~= UPFUSE_COUNT then return false, "Pick " .. UPFUSE_COUNT .. " monsters of the same rarity" end
+		local tier
+		for _, iid in ids do
+			local inst = d.Monsters[iid]
+			local def = inst and Config.ById[inst.id]
+			if not def then return false, "You don't own that monster" end
+			if inst.lock then return false, nameOf(inst) .. " is locked" end
+			if Game.slotOf(p, iid) then return false, "Remove " .. nameOf(inst) .. " from your base first" end
+			local t = Config.Tier[def.rarity]
+			if tier and t ~= tier then return false, "All " .. UPFUSE_COUNT .. " must be the same rarity" end
+			tier = t
+		end
+		if tier >= #Config.Rarities then return false, "Already the top rarity" end
+		local pool = {}
+		for _, def in Config.Pools[Config.Rarities[tier + 1].id] or {} do
+			if not def.dice or table.find(def.dice, d.SelectedDie) or d.Dice.glitch then table.insert(pool, def) end
+		end
+		if #pool == 0 then return false, "Nothing to fuse into yet" end
+		for _, iid in ids do Game.removeMonster(p, iid) end
+		local def = pool[rng:NextInteger(1, #pool)]
+		local iid = Game.addMonster(p, def, "Normal", nil)
+		Game.bump(p, "fusions")
+		Game.publish(player, p, "Monsters", "Index", "Team", "Gear", "Progress")
+		Data.saveSoon(player)
+		return true, { id = def.id, iid = iid }
 	end
 	return false, "Bad request"
 end
@@ -522,6 +563,7 @@ M.DiceAction.OnServerInvoke = function(player, action, dieId)
 		if owned[dieId] then return false, "Already owned" end -- never charge twice
 		local prev = DiceConfig.List[DiceConfig.Index[dieId] - 1]
 		if prev and not owned[prev.id] then return false, "Buy the " .. prev.name .. " first" end
+		if die.rebirth and p.data.Rebirths < die.rebirth then return false, "Unlocks at Rebirth " .. die.rebirth end
 		if not Game.spend(p, die.cost) then return false, "Need $" .. short(die.cost) end
 		owned[dieId] = true
 		p.data.SelectedDie = dieId
@@ -544,6 +586,12 @@ M.Rebirth.OnServerInvoke = function(player)
 	local d = p.data
 	local req = RebirthConfig.requirement(d.Rebirths)
 	if req.stage and not d.BattleProgress[req.stage] then return false, "Defeat the Overgrown Brute first" end
+	local have = 0
+	for _, m in d.Monsters do
+		local def = Config.ById[m.id]
+		if def and Config.Tier[def.rarity] >= req.minTier then have += 1 end
+	end
+	if have < req.count then return false, ("Own %d %s+ monsters first (%d/%d)"):format(req.count, Config.Rarities[req.minTier].id, have, req.count) end
 	if not Game.spend(p, req.cost) then return false, "Need $" .. short(req.cost) end
 	local ap = RebirthConfig.apply(d)
 	Game.addCash(p, Game.stat(p, "startcash")) -- Head Start

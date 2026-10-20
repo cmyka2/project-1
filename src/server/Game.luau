@@ -16,6 +16,7 @@ local Luck = require(M.LuckConfig)
 local F = require(M.Formulas)
 local Progress = require(M.ProgressConfig)
 local Mon = require(M.MonetizationConfig)
+local Traits = require(M.TraitConfig)
 local Data = require(script.Parent.DataService)
 
 local Game = {}
@@ -101,13 +102,15 @@ function Game.gearSec(p, iid, stat: string)
 	end
 	return b
 end
+-- playing with friends: +10% income per friend in the server, up to +50% (live income only, like Steal a Brainrot)
+function Game.friendMult(p) return 1 + math.min(0.5, 0.1 * (p.friends or 0)) end
 -- income per second of one instance (lvl overrides its level for upgrade previews; offline drops temporary boosts)
 function Game.income(p, iid, lvl: number?, offline: boolean?)
 	local inst = p.data.Monsters[iid]
 	if not inst then return 0 end
-	return Game.baseIncome(inst) * F.levelMult(lvl or inst.lvl) * F.fusionMult(inst.fr)
+	return Game.baseIncome(inst) * F.levelMult(lvl or inst.lvl) * F.fusionMult(inst.fr) * Traits.incomeMult(inst)
 		* (1 + Game.stat(p, "income")) * (1 + Game.gearBonus(p, iid) + Game.gearSec(p, iid, "income"))
-		* (1 + p.data.Rebirths * Rebirth.INCOME_BONUS) * (offline and 1 or Game.boost(p, "income"))
+		* (1 + p.data.Rebirths * Rebirth.INCOME_BONUS) * (offline and 1 or Game.boost(p, "income") * Game.friendMult(p))
 end
 -- only monsters placed on unlocked base slots earn
 function Game.incomePerSec(p, offline: boolean?)
@@ -127,7 +130,7 @@ function Game.combat(p, iid)
 	local def = inst and Config.ById[inst.id]
 	if not def then return nil end
 	local st = BattleConfig.monsterStats(def, inst.v)
-	local cm = F.combatMult(inst.lvl, inst.fr)
+	local cm = F.combatMult(inst.lvl, inst.fr) * Traits.combatMult(inst)
 	st.dmg = math.floor(st.dmg * cm * (1 + Game.gearBonus(p, iid, "weapon")) * (1 + Game.stat(p, "damage")))
 	st.hp = math.floor(st.hp * cm * (1 + Game.gearBonus(p, iid, "armor")) * (1 + Game.stat(p, "health")))
 	st.def = math.floor(st.def * (1 + Game.stat(p, "defense")))
@@ -156,11 +159,12 @@ function Game.spend(p, amount: number): boolean
 end
 
 -- INVENTORY
-function Game.addMonster(p, def, variant: string)
+-- mu = mutation id (TraitConfig) or nil
+function Game.addMonster(p, def, variant: string, mu: string?)
 	local d = p.data
 	local iid = "m" .. d.NextMonsterId
 	d.NextMonsterId += 1
-	d.Monsters[iid] = { id = def.id, v = variant, lvl = 1, fr = 0, t = os.time() }
+	d.Monsters[iid] = { id = def.id, v = variant, lvl = 1, fr = 0, t = os.time(), mu = mu }
 	local disc = d.Discovered[def.id] or {}
 	local isNew = not disc[variant]
 	disc[variant] = true
@@ -211,7 +215,7 @@ local function monsters(p)
 		local base, cs = Game.baseIncome(m), Game.combat(p, iid)
 		local maxed = m.lvl >= F.MAX_LEVEL
 		out[iid] = {
-			id = m.id, v = m.v, lvl = m.lvl, fr = m.fr, lock = m.lock, fav = m.fav, t = m.t, role = cs and cs.role,
+			id = m.id, v = m.v, lvl = m.lvl, fr = m.fr, lock = m.lock, fav = m.fav, t = m.t, role = cs and cs.role, mu = m.mu, tr = m.tr,
 			inc = Game.income(p, iid), nxt = not maxed and Game.income(p, iid, m.lvl + 1) or nil,
 			cost = not maxed and Game.upgradeCost(p, m) or nil, fuse = Game.fuseCost(p, m),
 			sell = F.sellValue(base, m.lvl, Game.stat(p, "sell")), hp = cs and cs.hp, dmg = cs and cs.dmg, spd = cs and cs.spd,
@@ -277,6 +281,8 @@ function Game.publish(player: Player, p, ...)
 	s:SetAttribute("ChestDiscount", 1 - cut(p, "chestcost"))
 	s:SetAttribute("OfflineCap", Game.offlineCap(p))
 	s:SetAttribute("LuckyRolls", d.LuckyRolls)
+	s:SetAttribute("Gems", d.Gems)
+	s:SetAttribute("Friends", p.friends or 0)
 	s:SetAttribute("Settings", Http:JSONEncode(d.Settings))
 	s:SetAttribute("Passes", Http:JSONEncode(p.passes or {}))
 	s:SetAttribute("Restricted", p.restricted == true)

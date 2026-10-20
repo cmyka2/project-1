@@ -166,6 +166,11 @@ print("19-21. rebirth -> slot + floor milestones")
 local cost = R.req(R.RS.Monster.RebirthConfig).cost(0)
 p.data.Cash = cost
 R.run(1.1)
+local okNo, errNo = R.invoke("Rebirth", A)
+check(not okNo and tostring(errNo):find("Own 2"), "rebirth needs rare monsters: " .. tostring(errNo))
+p.data.Cash = cost
+for _ = 1, 2 do Game.addMonster(p, Config.ById.solarius, "Normal") end -- 2 Mythics cover the early monster requirements
+R.run(1.1)
 ok, err = R.invoke("Rebirth", A)
 check(ok, "rebirth: " .. tostring(err))
 check(p.data.Rebirths == 1 and p.data.Cash < Game.incomePerSec(p) * 2 and Game.slotCount(p) == 6, "rebirth 1: cash reset, 6 slots")
@@ -345,6 +350,43 @@ R.run(12)
 local lb = R.RS:GetAttribute("Leaderboards")
 check(lb and R.decode(lb).boards[1].entries[1] ~= nil, "leaderboard published (server fallback)")
 check(R.decode(R.encode(p.data)) ~= nil, "profile still JSON-serializable")
+
+print("roll-and-earn pass: traits + gems, mutations, fuse machine, die gates, friends")
+local Traits = R.req(R.RS.Monster.TraitConfig)
+p.data.Gems = 0
+R.run(0.3)
+check(select(1, R.invoke("InventoryAction", A, "trait", iid)) == false, "trait reroll needs a Gem")
+p.data.Gems = 3
+local incT = Game.income(p, iid)
+R.run(0.3)
+local okT, tr = R.invoke("InventoryAction", A, "trait", iid)
+check(okT and Traits.TraitById[tr] and p.data.Monsters[iid].tr == tr and p.data.Gems == 2, "trait rerolled for 1 Gem")
+check(math.abs(Game.income(p, iid) / incT - Traits.TraitById[tr].income) < 1e-9, "trait multiplies income exactly once")
+p.data.Monsters[iid].mu = "golden"
+check(math.abs(Game.income(p, iid) / incT - Traits.TraitById[tr].income * 1.5) < 1e-9, "Golden mutation x1.5")
+local five = {}
+for _ = 1, 5 do table.insert(five, (Game.addMonster(p, Config.ById.rockling, "Normal"))) end
+R.run(0.3)
+local four = { five[1], five[2], five[3], five[4] }
+check(select(1, R.invoke("InventoryAction", A, "upfuse", four)) == false, "fuse machine needs exactly 5")
+R.run(0.3)
+local okF, outF = R.invoke("InventoryAction", A, "upfuse", five)
+check(okF and Config.ById[outF.id].rarity == "Uncommon" and p.data.Monsters[five[1]] == nil, "5 Commons -> 1 Uncommon")
+local mixed = {}
+for _ = 1, 4 do table.insert(mixed, (Game.addMonster(p, Config.ById.rockling, "Normal"))) end
+table.insert(mixed, (Game.addMonster(p, Config.ById.frostfang, "Normal")))
+R.run(0.3)
+check(select(1, R.invoke("InventoryAction", A, "upfuse", mixed)) == false and p.data.Monsters[mixed[1]] ~= nil, "mixed rarities rejected, nothing consumed")
+local ipsF = Game.incomePerSec(p)
+p.friends = 2
+check(math.abs(Game.incomePerSec(p) / ipsF - 1.2) < 1e-9 and math.abs(Game.incomePerSec(p, true) - Game.incomePerSec(p) / 1.2) < 1e-6 * ipsF, "2 friends: +20% live income, not offline")
+p.friends = 0
+local savedDice = table.clone(p.data.Dice)
+for _, dd in { "desert", "mountain", "volcano", "cave", "heaven", "cosmic" } do p.data.Dice[dd] = true end
+R.run(0.3)
+local okH, errH = R.invoke("DiceAction", A, "buy", "glitch")
+check(not okH and tostring(errH):find("Rebirth 8"), "Glitch Die is rebirth-gated: " .. tostring(errH))
+p.data.Dice = savedDice
 
 print("robux shop: passes, products, receipts, region policy, rolls")
 local Mon = R.req(R.RS.Monster.MonetizationConfig)

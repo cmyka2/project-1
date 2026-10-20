@@ -12,7 +12,7 @@ What *has* been run, on a Luau host outside Roblox (`tools/headless`):
 |---|---|
 | `check.luau` | Every `.luau` file under `src/` compiles (syntax only, no type check). |
 | `specs.luau` | The Studio specs in `ServerStorage/Tests` all pass: **RollSpec**, **BattleSpec** and **ProgressionSpec**. |
-| `sim.luau` | The **real** server scripts run on a mock engine (150/150 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, MonetizationService, PlotAssigner. |
+| `sim.luau` | The **real** server scripts run on a mock engine (161/161 checks pass): DataService, Game, Guard, MonsterService, ChestService, BattleService, ProgressService, LeaderboardService, MonetizationService, PlotAssigner. |
 | `fallback.luau` | With an empty workspace, HubFallback builds every hub piece and a roll works. |
 
 The specs cover:
@@ -118,6 +118,7 @@ Every row is pending a Studio playtest.
 | **Daily / quests / events §20** | **Done.** <ul><li>7-day UTC cycle (streak resets after a missed day); day 4 is a 2× luck boost</li><li>15-quest chain, 3 active, auto-completed from server counters</li><li>Events: weekend double income; Halloween 1.5× luck (2026-10-24 → 11-02) with an event recipe</li></ul> | `ProgressConfig`, `ProgressService`, `ExtrasUI` |
 | **Cosmetics §3.4** | **Done.** <ul><li>Titles over the head and aura particles</li><li>Bought with cash, earned from milestones/daily/VIP, or a fixed Robux supporter aura</li></ul> | `ProgressService` |
 | **Robux shop (added on request)** | **Done (needs Roblox ids).** <ul><li>Gamepasses: Lucky 2x, Super Lucky 3x, VIP, Quick Roll, Auto Roll, Triple Roll, Huge Backpack</li><li>Products: 10/100/1000 Lucky Rolls (10x luck each), Luck Potion, Server Luck</li><li>One ProcessReceipt; the receipt is saved before PurchaseGranted, so a purchase is never granted twice</li><li>Odds shown before purchase; paid luck blocked where Roblox restricts paid random items</li><li>Clover icons ready to upload</li></ul> This deliberately changes spec §3.4 ("never randomized paid rewards"); see `docs/RESEARCH.md`. | `MonetizationConfig`, `MonetizationService`, `ShopUI`, `assets/shop-icons` |
+| **Roll-and-earn pass (research pass 2)** | **Done.** <ul><li>Mutations (natural Golden/Diamond/Rainbow + 8 weather mutations) multiply income</li><li>Traits rerolled for Gems (odds shown)</li><li>Gems currency (daily, quests, battles, codes)</li><li>Fuse Machine (5 of a rarity → next rarity)</li><li>Rebirth also needs 2 monsters at a climbing rarity bar</li><li>Top dice rebirth-gated (Heaven 2, Cosmic 4, Glitch 8)</li><li>+10% income per friend in the server (max +50%)</li><li>Saturday Lucky Hour (3x luck)</li><li>+$ popups over your monsters</li></ul> See `docs/RESEARCH.md`. | `TraitConfig`, `MonsterService`, `ProgressService`, `BackpackUI`, `BaseFX` |
 | **Genre mechanics (from research)** | **Done.** <ul><li>Golden roll every 10th, Rainbow every 100th</li><li>8 biomes boosting one element's odds, with world tint and timers</li><li>Codes</li><li>Cross-server Secret+ announcements</li><li>Premium x1.1 luck</li><li>Roll FX: spinner, flash, shake, cutscene, skip setting</li><li>Floating tags over placed monsters</li></ul> See `docs/RESEARCH.md` for what was taken from which games. | `MonsterService`, `ProgressService`, `RollFX`, `HudUI` |
 | **Asset registry §4** | **Done.** Used for monsters, shops, statue, arenas, enemies, bosses and aura particles | `AssetRegistry` |
 | **World §3** | **Kept.** The Studio hub is found at runtime; HubFallback adds labeled placeholders for anything missing, including DailyRewards, Leaderboard and CosmeticShop | `HubFallback` |
@@ -166,8 +167,12 @@ Every row is pending a Studio playtest.
     - Odds panel numbers match the Index.
     - `PolicyService` restriction behaves as expected on a test account.
 11. **RollFX.** Spinner, flash, shake and the Divine+ cutscene (`DevGiveMonster` won't trigger it; roll with `DevGrantProduct lucky_1000`). The skip setting works.
-12. **Biomes.** `DevStartBiome`: tint, timer, announcement, Index odds change.
-13. **Attribute sizes** with a full backpack (≈30 KB `Monsters` JSON). **HUD overlap** on small screens: the left button stack (BAG to TREE), the top-left row and the right action column.
+12. **Traits / mutations / Fuse Machine.**
+    - Backpack: reroll a trait, try Select → Fuse Machine.
+    - Mutations show in names, the roll reveal and pedestal tags.
+    - RebirthUI shows the "Own 2 X+" line.
+13. **Biomes.** `DevStartBiome`: tint, timer, announcement, Index odds change.
+14. **Attribute sizes** with a full backpack (≈30 KB `Monsters` JSON). **HUD overlap** on small screens: the left button stack (BAG to TREE), the top-left row and the right action column.
 
 ## Model assets the code asks for (registry ids)
 

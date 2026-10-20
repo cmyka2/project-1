@@ -17,49 +17,54 @@ P.Milestones = {
 
 -- QUESTS: a chain; the first 3 not yet completed are active and auto-complete from server counters.
 -- stat: rolls | discoveries | placed | earned | upgrades | chests | wins | bosses | fusions | rebirths
--- reward: cash, gear (rarity), mats
+-- reward: cash, gems, gear (rarity), mats
 local function q(id, text, stat, target, reward) return { id = id, text = text, stat = stat, target = target, reward = reward } end
 P.Quests = {
 	q("roll10", "Roll 10 times", "rolls", 10, { cash = 500 }),
 	q("discover5", "Discover 5 monsters", "discoveries", 5, { cash = 1000 }),
 	q("place3", "Place 3 monsters on your base", "placed", 3, { cash = 1500 }),
-	q("upgrade1", "Upgrade a monster", "upgrades", 1, { cash = 2000 }),
+	q("upgrade1", "Upgrade a monster", "upgrades", 1, { gems = 5, cash = 2000 }),
 	q("earn10k", "Earn $10k in total", "earned", 10e3, { cash = 2500 }),
-	q("chest1", "Open a chest", "chests", 1, { mats = { forest_essence = 3 } }),
-	q("win1", "Win a battle", "wins", 1, { gear = "Uncommon" }),
+	q("chest1", "Open a chest", "chests", 1, { gems = 5, mats = { forest_essence = 3 } }),
+	q("win1", "Win a battle", "wins", 1, { gems = 10, gear = "Uncommon" }),
 	q("roll100", "Roll 100 times", "rolls", 100, { cash = 20000 }),
-	q("boss1", "Defeat a boss", "bosses", 1, { gear = "Rare" }),
-	q("fuse1", "Fuse a duplicate", "fusions", 1, { cash = 50000 }),
-	q("rebirth1", "Perform a rebirth", "rebirths", 1, { gear = "Epic" }),
+	q("boss1", "Defeat a boss", "bosses", 1, { gems = 15, gear = "Rare" }),
+	q("fuse1", "Fuse a duplicate", "fusions", 1, { gems = 10, cash = 50000 }),
+	q("rebirth1", "Perform a rebirth", "rebirths", 1, { gems = 20, gear = "Epic" }),
 	q("discover25", "Discover 25 monsters", "discoveries", 25, { mats = { desert_relic = 5 } }),
 	q("earn10m", "Earn $10m in total", "earned", 10e6, { cash = 1e6 }),
-	q("win25", "Win 25 battles", "wins", 25, { gear = "Legendary" }),
-	q("rebirth6", "Reach your second floor (6 rebirths)", "rebirths", 6, { gear = "Mythic" }),
+	q("win25", "Win 25 battles", "wins", 25, { gems = 30, gear = "Legendary" }),
+	q("rebirth6", "Reach your second floor (6 rebirths)", "rebirths", 6, { gems = 50, gear = "Mythic" }),
 }
 
 -- DAILY: 7-day cycle on UTC days; missing a day restarts at day 1. cashSecs = seconds of current income (min cash).
 P.Daily = {
-	{ text = "Cash", cashSecs = 600, cash = 2000 },
-	{ text = "Chest", chest = true },
-	{ text = "Materials", mats = { forest_essence = 5, desert_relic = 2 } },
-	{ text = "2x Luck (15 min)", boost = { effect = "luck", mult = 2, secs = 900 } },
-	{ text = "Rare Gear", gear = "Rare" },
-	{ text = "Rare Chest", gear = "Epic" },
-	{ text = "Weekly title + Legendary Gear", gear = "Legendary", cosmetic = "title_weekly" },
+	{ text = "Cash + 5 Gems", cashSecs = 600, cash = 2000, gems = 5 },
+	{ text = "Chest + 5 Gems", chest = true, gems = 5 },
+	{ text = "Materials + 10 Gems", mats = { forest_essence = 5, desert_relic = 2 }, gems = 10 },
+	{ text = "2x Luck (15 min) + 10 Lucky Rolls", boost = { effect = "luck", mult = 2, secs = 900 }, luckyRolls = 10 },
+	{ text = "Rare Gear + 15 Gems", gear = "Rare", gems = 15 },
+	{ text = "Epic Gear + 15 Gems", gear = "Epic", gems = 15 },
+	{ text = "Weekly title + Legendary Gear + 50 Gems", gear = "Legendary", cosmetic = "title_weekly", gems = 50 },
 }
 
--- EVENTS: active by date window (UTC unix) or by weekday (os.date("!*t").wday: 1 = Sunday, 7 = Saturday).
+-- EVENTS: active by date window (UTC unix) or by weekday (os.date("!*t").wday: 1 = Sunday, 7 = Saturday),
+-- optionally limited to some UTC hours.
 -- effects multiply income/luck in the temporary bracket (never applied to offline earnings).
 P.Events = {
 	{ id = "weekend_income", name = "Weekend Double Income", weekdays = { 1, 7 }, effects = { income = 2 } },
+	-- a weekly scheduled luck hour (the genre's "admin abuse" slot): Saturdays 18:00-19:00 UTC
+	{ id = "lucky_hour", name = "Lucky Hour: 3x Luck", weekdays = { 7 }, hours = { 18 }, effects = { luck = 3 } },
 	{ id = "halloween_hunt", name = "Halloween Hunt: 1.5x Luck", from = 1792800000, to = 1793577600, effects = { luck = 1.5 } }, -- 2026-10-24 .. 2026-11-02
 }
 P.EventById = {}
 for _, e in P.Events do P.EventById[e.id] = e end
 function P.activeEvents(now: number, forced: { [string]: number }?)
-	local out, wday = {}, os.date("!*t", now).wday
+	local t = os.date("!*t", now)
+	local out, wday = {}, t.wday
 	for _, e in P.Events do
-		local on = (e.from and now >= e.from and now < e.to) or (e.weekdays and table.find(e.weekdays, wday) ~= nil)
+		local on = (e.from and now >= e.from and now < e.to)
+			or (e.weekdays and table.find(e.weekdays, wday) ~= nil and (not e.hours or table.find(e.hours, t.hour) ~= nil))
 		if on or (forced and forced[e.id] and forced[e.id] > now) then table.insert(out, e) end
 	end
 	return out
@@ -88,9 +93,9 @@ P.BiomeById = {}
 for _, b in P.Biomes do P.BiomeById[b.id] = b end
 
 -- CODES: each redeemable once per player, case-insensitive. expires = unix time (nil = never).
--- reward keys: cash, luckyRolls, boost { effect, mult, secs }, mats, gear
+-- reward keys: cash, gems, luckyRolls, boost { effect, mult, secs }, mats, gear
 P.Codes = {
-	{ code = "RELEASE", reward = { luckyRolls = 10, cash = 1000 } },
+	{ code = "RELEASE", reward = { luckyRolls = 10, cash = 1000, gems = 20 } },
 	{ code = "LUCKY", reward = { luckyRolls = 25 } },
 	{ code = "SPOOKY", reward = { boost = { effect = "luck", mult = 2, secs = 900 } }, expires = 1793577600 },
 }

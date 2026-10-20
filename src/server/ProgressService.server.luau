@@ -23,6 +23,8 @@ local rng = Random.new()
 local function grant(player, p, r)
 	local d, got = p.data, {}
 	if r.cash then Game.addCash(p, r.cash) table.insert(got, "$" .. Game.short(r.cash)) end
+	if r.gems then d.Gems += r.gems table.insert(got, r.gems .. " Gems") end
+	if r.luckyRolls then d.LuckyRolls += r.luckyRolls table.insert(got, r.luckyRolls .. " Lucky Rolls") end
 	for mat, n in r.mats or {} do
 		d.Materials[mat] = (d.Materials[mat] or 0) + n
 		table.insert(got, n .. " " .. GearConfig.MaterialById[mat].name)
@@ -200,7 +202,7 @@ local function claimDaily(player, p)
 		d.Boosts[b.effect] = { mult = b.mult, ends = os.time() + b.secs }
 		table.insert(got, day.text)
 	end
-	local more = grant(player, p, { mats = day.mats, gear = day.gear, cosmetic = day.cosmetic })
+	local more = grant(player, p, { mats = day.mats, gear = day.gear, cosmetic = day.cosmetic, gems = day.gems, luckyRolls = day.luckyRolls })
 	if more ~= "" then table.insert(got, more) end
 	Game.publish(player, p)
 	Data.saveSoon(player)
@@ -239,14 +241,13 @@ local function redeem(player, p, text)
 	if d.Codes[key] then return false, "Already redeemed" end
 	d.Codes[key] = true
 	local r, got = c.reward, {}
-	if r.luckyRolls then d.LuckyRolls += r.luckyRolls table.insert(got, r.luckyRolls .. " Lucky Rolls") end
 	if r.boost then
 		local b, now = d.Boosts[r.boost.effect], os.time()
 		local live = b and b.ends > now
 		d.Boosts[r.boost.effect] = { mult = math.max(r.boost.mult, live and b.mult or 1), ends = (live and b.ends or now) + r.boost.secs }
 		table.insert(got, r.boost.mult .. "x " .. r.boost.effect .. " for " .. r.boost.secs // 60 .. " min")
 	end
-	local more = grant(player, p, { cash = r.cash, mats = r.mats, gear = r.gear })
+	local more = grant(player, p, { cash = r.cash, gems = r.gems, luckyRolls = r.luckyRolls, mats = r.mats, gear = r.gear })
 	if more ~= "" then table.insert(got, more) end
 	Game.publish(player, p)
 	Data.saveSoon(player)
@@ -278,6 +279,39 @@ M.ProgressAction.OnServerInvoke = function(player, action, a, b)
 	if action == "setting" then return setting(p, a, b) end
 	return false, "Bad request"
 end
+
+-- FRIENDS: +10% income per friend in this server (Game.friendMult); recounted on joins and leaves
+local friendCache = {} -- [a][b] = bool (IsFriendsWith yields, so cache it per pair)
+local function recountFriends()
+	local list = Players:GetPlayers()
+	for _, a in list do
+		local p = Game.get(a)
+		if p then
+			local n = 0
+			for _, b in list do
+				if b ~= a then
+					friendCache[a] = friendCache[a] or {}
+					if friendCache[a][b] == nil then
+						local ok, yes = pcall(a.IsFriendsWith, a, b.UserId)
+						friendCache[a][b] = ok and yes or false
+					end
+					if friendCache[a][b] then n += 1 end
+				end
+			end
+			if p.friends ~= n then
+				p.friends = n
+				Game.publish(a, p, "Monsters")
+				Game.BaseChanged:Fire(a)
+			end
+		end
+	end
+end
+Data.onLoaded(function() task.spawn(recountFriends) end)
+Players.PlayerRemoving:Connect(function(player)
+	friendCache[player] = nil
+	for _, c in friendCache do c[player] = nil end
+	task.defer(recountFriends)
+end)
 
 -- BIOMES: published on ReplicatedStorage "Biome" (public); the roll pool reads Game.biome
 local biomeToken = 0

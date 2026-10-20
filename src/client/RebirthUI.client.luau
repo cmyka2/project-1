@@ -5,6 +5,7 @@ local PPS = game:GetService("ProximityPromptService")
 local Rebirth = require(RS:WaitForChild("Monster"):WaitForChild("RebirthConfig"))
 local F = require(RS.Monster:WaitForChild("Formulas"))
 local B = require(RS.Monster:WaitForChild("BattleConfig"))
+local Config = require(RS.Monster:WaitForChild("MonsterConfig"))
 local RebirthRF = RS.Monster:WaitForChild("Rebirth")
 local player = Players.LocalPlayer
 local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
@@ -55,18 +56,27 @@ local function refresh()
 		local ok, prog = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), state:GetAttribute("BattleProgress") or "")
 		cleared = ok and prog[req.stage] == true
 	end
-	count.Text = "Rebirths: " .. n .. "  →  " .. n + 1
+	-- own `count` monsters of tier >= minTier (kept, not consumed)
+	local okM, mons = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), state:GetAttribute("Monsters") or "")
+	local have = 0
+	for _, m in okM and mons or {} do
+		local def = Config.ById[m.id]
+		if def and Config.Tier[def.rarity] >= req.minTier then have += 1 end
+	end
+	local monstersOk = have >= req.count
+	count.Text = "Rebirths: " .. n .. "  →  " .. n + 1 .. "   •   " .. (monstersOk and "✅ " or "❌ ") .. "Own " .. req.count .. " " .. Config.Rarities[req.minTier].id .. "+ (" .. math.min(have, req.count) .. "/" .. req.count .. ")"
 	local nowS, nextS, nowF, nextF = F.slots(n), F.slots(n + 1), F.floors(n), F.floors(n + 1)
 	slots.Text = "Slots " .. nowS .. " → " .. nextS .. (nextS == nowS and " (max)" or "") .. "   •   Floors " .. nowF .. " → " .. nextF .. (nextF > nowF and " NEW FLOOR!" or "")
 	perks.Text = ("Permanent: +%d%% income, +%d%% luck, +%d Ascension Points"):format(Rebirth.INCOME_BONUS * 100, Rebirth.LUCK_BONUS * 100, Rebirth.points(n + 1))
 	costL.Text = "Cost: $" .. short(req.cost) .. "   (you have $" .. short(cash) .. ")"
 		.. (req.stage and ("\n" .. (cleared and "✅ " or "❌ ") .. "Defeat " .. B.StageById[req.stage].name:gsub("^BOSS: ", "")) or "")
-	local can = cash >= req.cost and cleared
+	local can = cash >= req.cost and cleared and monstersOk
 	confirm.AutoButtonColor = can
 	confirm.BackgroundColor3 = can and Color3.fromRGB(170, 70, 255) or Color3.fromRGB(90, 80, 100)
 end
 state:GetAttributeChangedSignal("Cash"):Connect(function() if panel.Visible then refresh() end end)
 state:GetAttributeChangedSignal("Rebirths"):Connect(refresh)
+state:GetAttributeChangedSignal("Monsters"):Connect(function() if panel.Visible then refresh() end end)
 
 confirm.MouseButton1Click:Connect(function()
 	local ok, err = RebirthRF:InvokeServer()
