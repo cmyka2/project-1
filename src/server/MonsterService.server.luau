@@ -25,7 +25,10 @@ local short = Game.short
 
 local function applyWalk(player, p)
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = 16 + Game.stat(p, "walkspeed") end
+	if not hum then return end
+	hum.WalkSpeed = 16 + Game.stat(p, "walkspeed")
+	hum.UseJumpPower = true
+	hum.JumpPower = 50 + Game.stat(p, "jump")
 end
 
 -- BASE: plot lookup, generated upper floors, slot rendering
@@ -167,7 +170,7 @@ Data.onLoaded(function(player, p)
 	ls.Parent = player
 	local d = p.data
 	if d.LastOnline then
-		local amount, secs = F.offline(os.time() - d.LastOnline, Game.incomePerSec(p))
+		local amount, secs = F.offline(os.time() - d.LastOnline, Game.incomePerSec(p, true), Game.offlineCap(p))
 		if amount > 0 then
 			Game.addCash(p, amount)
 			local s = Game.state(player)
@@ -217,6 +220,22 @@ local function showRoll(player, core, def, variant)
 	Debris:AddItem(m, 4)
 end
 
+local Announce = M.Announce
+local function grant(player, p, core, def, variant)
+	local d = p.data
+	local iid, isNew = Game.addMonster(p, def, variant)
+	local s = Game.state(player)
+	if s then s:SetAttribute("LastRoll", Http:JSONEncode({ id = def.id, v = variant, new = isNew, n = d.Rolls, iid = iid })) end
+	if isNew and Game.stat(p, "discovery") > 0 then -- Discovery Streak
+		Game.addCash(p, math.max(100, Game.incomePerSec(p) * Game.stat(p, "discovery")))
+	end
+	local tier = Config.Tier[def.rarity]
+	if tier >= 5 or variant ~= "Normal" then Data.saveSoon(player) end
+	if tier >= 6 or variant == "Monstrous" then
+		Announce:FireAllClients(("%s rolled %s%s (%s)!"):format(player.DisplayName, variant ~= "Normal" and variant:upper() .. " " or "", def.name, def.rarity), def.rarity)
+	end
+	showRoll(player, core, def, variant)
+end
 local function roll(player, core)
 	local p = Game.get(player)
 	if not p then return end
@@ -228,19 +247,54 @@ local function roll(player, core)
 	end
 	local die = Game.die(p)
 	if not d.Dice[die.id] then d.SelectedDie = "grassland" die = Game.die(p) end
-	local def, variant = Config.roll(rng, Game.luck(p), die.maxTier, die.id)
+	local luck = Game.luck(p)
+	local def, variant = Config.roll(rng, luck, die.maxTier, die.id)
 	if not def then warn("Empty roll pool for die", die.id) return end
 	d.Rolls += 1
-	local iid, isNew = Game.addMonster(p, def, variant)
-	Game.publish(player, p, "Index", "Monsters")
-	local s = Game.state(player)
-	if s then s:SetAttribute("LastRoll", Http:JSONEncode({ id = def.id, v = variant, new = isNew, n = d.Rolls, iid = iid })) end
-	if Config.Tier[def.rarity] >= 5 or variant ~= "Normal" then Data.saveSoon(player) end
-	showRoll(player, core, def, variant)
+	grant(player, p, core, def, variant)
+	if rng:NextNumber() < Game.stat(p, "double") and Game.count(d.Monsters) < Game.capacity(p) then -- Double Fortune
+		local def2, v2 = Config.roll(rng, luck, die.maxTier, die.id)
+		grant(player, p, core, def2, v2)
+		Game.notify(player, "Double Fortune! Bonus roll: " .. def2.name)
+	end
+	Game.publish(player, p, "Index", "Monsters", "Progress")
+	Game.Changed:Fire(player)
+end
+local summonCore
+local function nearSummon(player)
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	return summonCore and root and (root.Position - summonCore.Position).Magnitude <= 25
 end
 task.spawn(function() -- the summon station may be a placeholder made by HubFallback; don't block the remotes below
 	local summon = workspace:WaitForChild("Hub"):WaitForChild("Shops"):WaitForChild("SummonArea"):WaitForChild("SummonCore")
+	summonCore = summon
 	summon:WaitForChild("ProximityPrompt").Triggered:Connect(function(player) roll(player, summon) end)
+end)
+-- HUD roll button and auto-roll (Auto Pickup node): both only work standing at the summon station,
+-- and both go through roll(), so they share its cooldown and checks
+local auto = {} -- [Player] = true while auto-roll is on (session only)
+M.RollAction.OnServerInvoke = function(player, action, on)
+	local p = Game.get(player)
+	if not p then return false, "Still loading" end
+	if action == "roll" then
+		if not nearSummon(player) then return false, "Go to the Summon station to roll" end
+		roll(player, summonCore)
+		return true
+	elseif action == "auto" then
+		if on == true and Game.stat(p, "autoroll") <= 0 then return false, "Unlock Auto Pickup in the Evolution Tree" end
+		auto[player] = on == true or nil
+		return true
+	end
+	return false, "Bad request"
+end
+Players.PlayerRemoving:Connect(function(player) auto[player] = nil end)
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+		for player in auto do
+			if nearSummon(player) then roll(player, summonCore) end
+		end
+	end
 end)
 
 -- PLACEMENT: iid = nil removes whatever is on the slot
@@ -264,7 +318,8 @@ M.PlaceMonster.OnServerInvoke = function(player, slot, iid)
 		if other then return false, "Already placed on slot " .. other end
 		placed[sk] = iid
 	end
-	Game.publish(player, p, "Placed")
+	Game.publish(player, p, "Placed", "Progress")
+	Game.Changed:Fire(player)
 	renderSlot(player, p, slot)
 	Data.saveSoon(player)
 	return true
@@ -290,10 +345,11 @@ M.InventoryAction.OnServerInvoke = function(player, action, a, b)
 		local inst, iid = owned(p, a)
 		if not inst then return false, "You don't own that monster" end
 		if inst.lvl >= F.MAX_LEVEL then return false, "Max level" end
-		local cost = F.upgradeCost(Game.baseIncome(inst), inst.lvl)
+		local cost = Game.upgradeCost(p, inst)
 		if not Game.spend(p, cost) then return false, "Need $" .. short(cost) end
 		inst.lvl += 1
-		Game.publish(player, p, "Monsters")
+		Game.bump(p, "upgrades")
+		Game.publish(player, p, "Monsters", "Progress")
 		local sk = Game.slotOf(p, iid)
 		if sk then renderSlot(player, p, tonumber(sk)) end
 		return true
@@ -327,9 +383,10 @@ M.InventoryAction.OnServerInvoke = function(player, action, a, b)
 		return true, total
 	elseif action == "fuse" then
 		local target, tid = owned(p, a)
-		local mats = Guard.ids(b, F.FUSE_COPIES - 1)
+		local need = Game.fuseCopies(p) - 1
+		local mats = Guard.ids(b, need)
 		if not target then return false, "You don't own that monster" end
-		if not mats or #mats ~= F.FUSE_COPIES - 1 then return false, "Pick " .. (F.FUSE_COPIES - 1) .. " copies to fuse in" end
+		if not mats or #mats ~= need then return false, "Pick " .. need .. " copies to fuse in" end
 		if target.fr >= F.MAX_FUSION then return false, "Max fusion rank" end
 		for _, iid in mats do
 			local inst = d.Monsters[iid]
@@ -338,10 +395,11 @@ M.InventoryAction.OnServerInvoke = function(player, action, a, b)
 			if inst.lock then return false, nameOf(inst) .. " is locked" end
 			if Game.slotOf(p, iid) then return false, "Remove the copies from your base first" end
 		end
-		local cost = F.fuseCost(Game.baseIncome(target), target.fr)
+		local cost = Game.fuseCost(p, target)
 		if not Game.spend(p, cost) then return false, "Need $" .. short(cost) end
 		for _, iid in mats do Game.removeMonster(p, iid) end
 		target.fr += 1
+		Game.bump(p, "fusions")
 		Game.publish(player, p, "Monsters", "Index", "Team", "Gear")
 		local sk = Game.slotOf(p, tid)
 		if sk then renderSlot(player, p, tonumber(sk)) end
@@ -351,21 +409,46 @@ M.InventoryAction.OnServerInvoke = function(player, action, a, b)
 	return false, "Bad request"
 end
 
--- SKILL TREE
-M.BuySkill.OnServerInvoke = function(player, nodeId)
+-- EVOLUTION TREE (cash) / ASCENSION TREE (AP): nodeId, tree = nil | "ascension"; nodeId "respec" refunds the
+-- Evolution Tree at RESPEC_REFUND of the cash spent
+local RESPEC_REFUND = 0.75
+M.BuySkill.OnServerInvoke = function(player, nodeId, tree)
 	local p = Game.get(player)
 	if not p then return false, "Still loading" end
 	if not Guard.rate(player, "skill", 0.2) then return false, "Too fast" end
-	local node = Guard.str(nodeId) and Tree.ById[nodeId]
+	local d = p.data
+	if nodeId == "respec" then
+		if not Guard.rate(player, "respec", 5) then return false, "Too fast" end
+		local refund = math.floor(d.SkillSpent * RESPEC_REFUND)
+		d.Skills, d.SkillSpent = { start = 1 }, 0
+		Game.addCash(p, refund)
+		Game.dropRelics(p)
+		Game.publish(player, p)
+		applyWalk(player, p)
+		auto[player] = nil
+		renderAll(player, p)
+		Data.saveSoon(player)
+		return true, refund
+	end
+	local asc = tree == "ascension"
+	local node = Guard.str(nodeId) and (asc and Tree.AscById or Tree.ById)[nodeId]
 	if not node then return false, "Unknown upgrade" end
-	local skills = p.data.Skills
-	if skills[nodeId] then return false, "Already owned" end
-	if node.requires and not skills[node.requires] then return false, "Locked" end
-	if not Game.spend(p, node.cost) then return false, "Not enough cash" end
-	skills[nodeId] = true
+	local owned = asc and d.Ascension or d.Skills
+	local rank = owned[nodeId] or 0
+	local why = Tree.blocked(node, owned, d.Rebirths)
+	if why then return false, why end
+	local cost = Tree.cost(node, rank)
+	if asc then
+		if d.AscensionPoints < cost then return false, "Need " .. cost .. " Ascension Points" end
+		d.AscensionPoints -= cost
+	else
+		if not Game.spend(p, cost) then return false, "Need $" .. short(cost) end
+		d.SkillSpent += cost
+	end
+	owned[nodeId] = rank + 1
 	Game.publish(player, p) -- income/luck/combat previews all move
 	applyWalk(player, p)
-	renderAll(player, p) -- pad income labels change with Money nodes
+	renderAll(player, p) -- pad income labels
 	Data.saveSoon(player)
 	return true
 end
@@ -406,6 +489,8 @@ M.Rebirth.OnServerInvoke = function(player)
 	if req.stage and not d.BattleProgress[req.stage] then return false, "Defeat the Overgrown Brute first" end
 	if not Game.spend(p, req.cost) then return false, "Need $" .. short(req.cost) end
 	local ap = RebirthConfig.apply(d)
+	Game.addCash(p, Game.stat(p, "startcash")) -- Head Start
+	Game.bump(p, "rebirths")
 	Game.publish(player, p)
 	renderAll(player, p)
 	Data.saveSoon(player)

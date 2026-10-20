@@ -74,10 +74,10 @@ local function load(player: Player)
 	end
 	local p
 	if status == "ok" then
-		p = { data = data, saveable = true, userId = userId }
+		p = { data = data, saveable = true, userId = userId, player = player }
 	elseif RunService:IsStudio() and status ~= "locked" and status ~= "newer" then
 		warn("DataStore unavailable in Studio; playing without saving (publish + enable Studio API access to test saves)")
-		p = { data = Schema.default(), saveable = false, userId = userId }
+		p = { data = Schema.default(), saveable = false, userId = userId, player = player }
 	else
 		-- never start a session that could overwrite a real save with defaults
 		warn("Load refused for", player.Name, status)

@@ -55,7 +55,8 @@ return function()
 	assert(n == 4, "4 instances, got " .. n)
 	assert(m.Placed["2"] == frost and m.Monsters[m.Placed["3"]].id == "moss_goblin", "placements mapped to instances")
 	assert(m.Gear.g1.m == frost and m.Gear.g1.slot == nil and m.Gear.g2.m == nil, "gear follows the monster")
-	assert(m.Skills.money1 and m.Rebirths == 2 and m.Cash == 10 and m.Materials and m.BattleTeams, "fields kept/added")
+	assert(m.Rebirths == 2 and m.Materials and m.BattleTeams and m.Gear.g1.lvl == 1, "fields kept/added")
+	assert(m.Skills.start == 1 and m.Skills.money1 == nil and m.Cash == 10 + S.OLD_TREE_COST.money1, "old tree refunded in cash")
 	-- stacks beyond the cap are refunded, not lost
 	local big = S.migrate({ Version = 1, Cash = 0, Owned = { ["moss_goblin|Normal"] = S.MIGRATE_CAP + 10 } }, function() return 5 end)
 	local bn = 0 for _ in big.Monsters do bn += 1 end
@@ -69,5 +70,50 @@ return function()
 	assert(S.canTake({ job = "A", t = 990 }, "A", 1000))
 	assert(not S.canTake({ job = "B", t = 990 }, "A", 1000), "live foreign lock")
 	assert(S.canTake({ job = "B", t = 1000 - S.LOCK_EXPIRE }, "A", 1000), "expired lock")
+	-- Evolution Tree: ranks, prerequisites (incl. cross-branch), rebirth gates, each rank applied once
+	local T = require(M.SkillTree)
+	local owned = { start = 1 }
+	assert(T.blocked(T.ById.lucky_charm, owned, 0) == nil, "first node buyable")
+	assert(T.blocked(T.ById.rare_hunter, owned, 0), "second node needs the first")
+	assert(T.blocked(T.ById.fortune_engine, { start = 1, legendary_focus = 1 }, 0), "cross node needs both branches")
+	assert(T.blocked(T.ById.fortune_engine, { start = 1, legendary_focus = 1, golden_pedestals = 1 }, 0) == nil)
+	assert(T.blocked(T.ById.cosmic_fortune, { mythic_resonance = 1, double_fortune = 1, discovery_streak = 1 }, 2) == "Needs Rebirth 3")
+	assert(T.blocked(T.ById.lucky_charm, { lucky_charm = 5 }, 0) == "Maxed")
+	assert(math.abs(T.stat({ lucky_charm = 3, fortune_engine = 1 }, "luck") - (0.15 + 0.15)) < 1e-9, "ranks x value, summed across nodes")
+	assert(T.stat({ lucky_charm = 99 }, "luck") == 0.25, "rank clamped to max")
+	assert(T.cost(T.ById.coin_collector, 0) == 100 and T.cost(T.ById.coin_collector, 1) == 300, "cash cost grows per rank")
+	assert(T.cost(T.AscById.fated_luck, 0) == 2 and T.cost(T.AscById.fated_luck, 2) == 6, "AP cost grows per rank")
+	local seen = {}
+	for _, node in T.Nodes do
+		assert(not seen[node.q .. "," .. node.r], "two nodes on one hex: " .. node.id)
+		seen[node.q .. "," .. node.r] = true
+		for _, req in node.requires or {} do assert(T.ById[req], node.id .. " requires unknown " .. req) end
+		for effect in node.effects do assert(T.Effects[effect], node.id .. " has unknown effect " .. effect) end
+	end
+	for _, b in T.Branches do
+		if b.id ~= "cross" then
+			local count = 0
+			for _, node in T.Nodes do if node.branch == b.id then count += 1 end end
+			assert(count == 7, b.id .. " should have 7 nodes")
+		end
+	end
+
+	-- daily cycle: once per UTC day, streak continues on consecutive days, restarts after a gap, wraps after 7
+	local P = require(M.ProgressConfig)
+	local day = 86400
+	local d0 = { day = 0, last = -1 }
+	local n1 = P.nextDaily(d0, 100 * day)
+	assert(n1.day == 1 and P.nextDaily(n1, 100 * day + 3600) == nil, "one claim per day")
+	local n2 = P.nextDaily(n1, 101 * day + 5)
+	assert(n2.day == 2, "streak")
+	assert(P.nextDaily(n2, 105 * day).day == 1, "gap restarts")
+	assert(P.nextDaily({ day = 7, last = 200 }, 201 * day).day == 1, "wraps after day 7")
+	-- events: date window, weekday, forced
+	local hw = P.EventById.halloween_hunt
+	local function has(list, id) for _, e in list do if e.id == id then return true end end return false end
+	assert(has(P.activeEvents(hw.from + 10), "halloween_hunt") and not has(P.activeEvents(hw.to + 10), "halloween_hunt"))
+	assert(has(P.activeEvents(1792886400), "weekend_income") and not has(P.activeEvents(1792886400 + 2 * day), "weekend_income"), "2026-10-25 is a Sunday")
+	assert(has(P.activeEvents(0, { weekend_income = 10 }), "weekend_income"), "forced event")
+	assert(P.eventMult({ hw }, "luck") == 1.5 and P.eventMult({ hw }, "income") == 1)
 	return "progression ok"
 end

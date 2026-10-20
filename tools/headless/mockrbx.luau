@@ -404,13 +404,18 @@ local function module(parent, name, path)
 end
 local mon = newInst("Folder", "Monster")
 mon.Parent = RS
-for _, n in { "MonsterConfig", "Weighted", "LuckConfig", "Formulas", "RebirthConfig", "GearConfig", "BattleConfig", "DiceConfig", "SkillTree", "AssetRegistry", "MonsterModel" } do
+for _, n in { "MonsterConfig", "Weighted", "LuckConfig", "Formulas", "RebirthConfig", "GearConfig", "BattleConfig", "DiceConfig", "SkillTree", "AssetRegistry", "MonsterModel", "ProgressConfig" } do
 	module(mon, n, ROOT .. "shared/Monster/" .. n .. ".luau")
 end
-for _, n in { "PlaceMonster", "BuySkill", "Rebirth", "DiceAction", "ChestAction", "BattleAction", "InventoryAction" } do
+for _, n in { "PlaceMonster", "BuySkill", "Rebirth", "DiceAction", "ChestAction", "BattleAction", "InventoryAction", "RollAction", "ProgressAction", "ShopAction" } do
 	local rf = newInst("RemoteFunction", n)
 	rf.Parent = mon
 end
+local ann = newInst("RemoteEvent", "Announce")
+ann.Parent = mon
+R.announced = {}
+function Methods:FireAllClients(...) table.insert(R.announced, { ... }) end
+function Methods:FireClient(...) end
 for _, n in { "DataService", "DataSchema", "Game", "Guard", "BattleEngine" } do module(SSS, n, ROOT .. "server/" .. n .. ".luau") end
 local tests = newInst("Folder", "Tests")
 tests.Parent = SS

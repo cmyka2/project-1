@@ -38,11 +38,11 @@ function F.sellValue(base: number, lvl: number, sellBonus: number): number
 	return math.floor(base * 20 * F.levelMult(lvl) * (1 + sellBonus))
 end
 
--- OFFLINE EARNINGS: server timestamps only; elapsed is clamped to [0, cap]
+-- OFFLINE EARNINGS: server timestamps only; elapsed is clamped to [0, cap] (default 8h, skills/ascension extend it)
 F.OFFLINE_CAP = 8 * 3600
-function F.offline(elapsed: number, incomePerSec: number): (number, number)
+function F.offline(elapsed: number, incomePerSec: number, cap: number?): (number, number)
 	if typeof(elapsed) ~= "number" or elapsed ~= elapsed then return 0, 0 end
-	local secs = math.clamp(math.floor(elapsed), 0, F.OFFLINE_CAP)
+	local secs = math.clamp(math.floor(elapsed), 0, cap or F.OFFLINE_CAP)
 	return math.floor(secs * math.max(0, incomePerSec)), secs
 end
 

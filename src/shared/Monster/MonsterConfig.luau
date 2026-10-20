@@ -73,6 +73,32 @@ Config.Monsters = {
 	m("missing_texture", "Missing Texture", "Glitched", "Cosmic", "blob", { "glitch" }),
 }
 
+-- combat role follows the element (BattleConfig.Roles holds what each role changes)
+Config.RoleByElement = {
+	Fire = "Attacker", Lightning = "Attacker", Earth = "Tank", Light = "Healer",
+	Water = "Controller", Nature = "Support", Shadow = "Specialist", Cosmic = "Specialist",
+}
+Config.Lore = {
+	moss_goblin = "Hides in hedges and steals shiny pebbles.", meadow_slime = "Bounces after anyone who smells of flowers.",
+	rockling = "A pebble that refused to stay still.", puddle_pup = "Shakes off a small rainstorm when it's happy.",
+	ember_imp = "Its giggle sounds like crackling kindling.", spark_bug = "Charges up by rubbing its wings on wool.",
+	thornback = "Every thorn is a trophy from a fight it won.", dune_crawler = "Swims through sand like it's water.",
+	gloom_bat = "Only flies on moonless nights.", frostfang = "Its bite freezes rivers solid.",
+	magma_brute = "Leaves glowing footprints for days.", storm_drake = "Rides thunderheads across the sky.",
+	elder_treant = "Older than the island itself.", sandstorm_sphinx = "Asks one riddle. Nobody has answered it.",
+	tidal_serpent = "Its coils are the reason the tides turn.", solarius = "A sliver of the sun that came down to look around.",
+	void_stalker = "You never see it. You only notice the missing stars.", inferno_titan = "Volcanoes are its footsteps.",
+	seraph_guardian = "Keeps watch over every gate in the clouds.", aurora_whale = "Sings the northern lights into being.",
+	thunder_god = "Every storm is it clearing its throat.", star_weaver = "Knits constellations out of loose light.",
+	moon_howler = "The moon answers when it calls.", comet_rider = "Never in the same sky twice.",
+	astral_hydra = "Each head dreams of a different galaxy.", prism_phoenix = "Reborn in a new color every time.",
+	eclipse_lord = "Where it stands, noon becomes midnight.", time_keeper = "Winds the clock the universe runs on.",
+	world_turtle = "Carries a sleeping continent on its shell.", first_flame = "The spark everything else was lit from.",
+	the_watcher = "It has always been here. It is looking at you.", mimic_king = "Was that chest always there?",
+	hollow_echo = "Repeats things nobody has said yet.", null_0 = "ERROR: description not found.",
+	err0r_beast = "Crashes into reality at random intervals.", missing_texture = "The pink and black is not a pattern. It's a warning.",
+}
+
 Config.ById, Config.RarityById, Config.VariantById, Config.Tier, Config.Pools, Config.Odds = {}, {}, {}, {}, {}, {}
 for i, r in Config.Rarities do Config.RarityById[r.id] = r Config.Tier[r.id] = i end
 for _, v in Config.Variants do Config.VariantById[v.id] = v end

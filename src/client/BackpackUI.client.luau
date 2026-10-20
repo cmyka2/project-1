@@ -191,11 +191,14 @@ refreshDetail = function()
 		if iid ~= selected and o.id == m.id and o.v == m.v and not o.lock and not onBase then table.insert(copies, { iid = iid, lvl = o.lvl }) end
 	end
 	table.sort(copies, function(a, b) return a.lvl < b.lvl end)
+	local need = (state:GetAttribute("FuseCopies") or F.FUSE_COPIES) - 1
 	if m.fr < F.MAX_FUSION then
-		action("Fuse ★" .. m.fr + 1 .. "  (" .. math.min(#copies, F.FUSE_COPIES - 1) .. "/" .. F.FUSE_COPIES - 1 .. " copies, $" .. short(m.fuse) .. ")",
+		action("Fuse ★" .. m.fr + 1 .. "  (" .. math.min(#copies, need) .. "/" .. need .. " copies, $" .. short(m.fuse) .. ")",
 			Color3.fromRGB(120, 70, 190), function()
-				if #copies < F.FUSE_COPIES - 1 then say(false, "Need " .. F.FUSE_COPIES - 1 .. " free unlocked copies") return end
-				local ok, err = Inv:InvokeServer("fuse", selected, { copies[1].iid, copies[2].iid })
+				if #copies < need then say(false, "Need " .. need .. " free unlocked copies") return end
+				local mats = {}
+				for k = 1, need do mats[k] = copies[k].iid end
+				local ok, err = Inv:InvokeServer("fuse", selected, mats)
 				say(ok, err, "Fused to ★" .. m.fr + 1 .. "!")
 			end)
 	end
