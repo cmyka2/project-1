@@ -271,6 +271,7 @@ function Game.publishCash(player: Player, p)
 	if not s then return end
 	s:SetAttribute("Cash", p.data.Cash)
 	s:SetAttribute("CashPerSec", Game.incomePerSec(p))
+	s:SetAttribute("LifetimeEarnings", p.data.LifetimeEarnings)
 end
 -- short-lived message for the owner's HUD
 function Game.notify(player: Player, text: string)

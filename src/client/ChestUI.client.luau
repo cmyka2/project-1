@@ -65,25 +65,27 @@ for i, c in Gear.Chests do
 	local icon = text("TextLabel", row, "🧰", UDim2.fromOffset(56, 56), UDim2.fromOffset(10, 11))
 	icon.BackgroundTransparency = 0 icon.BackgroundColor3 = c.color Instance.new("UICorner", icon) Instance.new("UIStroke", icon).Thickness = 3
 	text("TextLabel", row, c.name, UDim2.new(0.55, -80, 0, 30), UDim2.fromOffset(76, 6), c.color).TextXAlignment = Enum.TextXAlignment.Left
-	local parts = {}
-	local odds = Gear.odds(c)
-	for _, r in Gear.Rarities do if odds[r.id] then table.insert(parts, r.id .. " " .. pct(odds[r.id])) end end
-	local o = text("TextLabel", row, table.concat(parts, " • "), UDim2.new(0.62, -80, 0, 34), UDim2.fromOffset(76, 38), Color3.fromRGB(230, 220, 200))
+	local o = text("TextLabel", row, "", UDim2.new(0.6, -80, 0, 34), UDim2.fromOffset(76, 38), Color3.fromRGB(230, 220, 200))
 	o.TextXAlignment = Enum.TextXAlignment.Left o.TextWrapped = true
-	local b = btn(row, UDim2.new(0.3, 0, 0, 52), UDim2.new(0.68, 0, 0, 13), Color3.fromRGB(50, 180, 70))
-	chestRows[c.id] = { button = b, chest = c }
-	b.MouseButton1Click:Connect(function()
-		local ok, res = ChestAction:InvokeServer("open", c.id)
+	local b = btn(row, UDim2.new(0.21, 0, 0, 52), UDim2.new(0.6, 0, 0, 13), Color3.fromRGB(50, 180, 70))
+	local b10 = btn(row, UDim2.new(0.15, 0, 0, 52), UDim2.new(0.83, 0, 0, 13), Color3.fromRGB(50, 150, 90))
+	b10.Text = "x10"
+	chestRows[c.id] = { button = b, chest = c, odds = o }
+	local function open(n)
+		local ok, res = ChestAction:InvokeServer("open", c.id, n)
 		if ok then
-			local g = res[1]
-			local r = Gear.RarityById[g.r]
-			shopMsg.TextColor3 = r.color
-			shopMsg.Text = "You got: " .. Gear.TypeById[g.t].icon .. " " .. Gear.name(g) .. "  (+" .. pct(r.income) .. " income & stats)"
+			local best = res[1]
+			for _, g in res do if Gear.RarityIndex[g.r] > Gear.RarityIndex[best.r] then best = g end end
+			shopMsg.TextColor3 = Gear.RarityById[best.r].color
+			shopMsg.Text = (#res > 1 and ("Opened " .. #res .. "! Best: ") or "You got: ") .. Gear.TypeById[best.t].icon .. " " .. Gear.name(best)
+				.. "  (+" .. pct(Gear.power(best)) .. ")" .. (best.sec and ("  " .. Gear.secondaryText(best)) or "")
 		else
 			shopMsg.TextColor3 = Color3.fromRGB(255, 140, 140)
 			shopMsg.Text = res
 		end
-	end)
+	end
+	b.MouseButton1Click:Connect(function() open(1) end)
+	b10.MouseButton1Click:Connect(function() open(10) end)
 end
 -- CRAFTING (same panel, below the chests)
 local craftRows = {}
@@ -91,7 +93,7 @@ for i, rec in Gear.Recipes do
 	local row = Instance.new("Frame") row.Size = UDim2.new(1, -12, 0, 78) row.BackgroundColor3 = Color3.fromRGB(55, 70, 50) row.LayoutOrder = 100 + i row.Parent = shopList
 	Instance.new("UICorner", row)
 	local r = Gear.RarityById[rec.rarity]
-	text("TextLabel", row, "⚒️ " .. rec.name, UDim2.new(0.6, -12, 0, 30), UDim2.fromOffset(12, 6), r.color).TextXAlignment = Enum.TextXAlignment.Left
+	text("TextLabel", row, "⚒️ " .. rec.name .. (rec.gtype == "relic" and " 🔮" or ""), UDim2.new(0.6, -12, 0, 30), UDim2.fromOffset(12, 6), r.color).TextXAlignment = Enum.TextXAlignment.Left
 	local need = text("TextLabel", row, "", UDim2.new(0.62, -12, 0, 30), UDim2.fromOffset(12, 40), Color3.fromRGB(230, 220, 200))
 	need.TextXAlignment = Enum.TextXAlignment.Left
 	local b = btn(row, UDim2.new(0.3, 0, 0, 52), UDim2.new(0.68, 0, 0, 13), Color3.fromRGB(50, 180, 70))
@@ -116,18 +118,25 @@ local function refreshShop()
 		row.button.Text = "Craft"
 		row.button.BackgroundColor3 = can and Color3.fromRGB(50, 180, 70) or Color3.fromRGB(150, 60, 60)
 	end
+	-- prices and odds the server will actually use (Treasure Research discount, Better Chest Finder luck)
+	local discount, luck = state:GetAttribute("ChestDiscount") or 0, state:GetAttribute("ChestLuck") or 0
 	for _, row in chestRows do
 		local c, b = row.chest, row.button
+		local price = math.floor(c.cost * (1 - discount))
+		local parts, odds = {}, Gear.odds(c, luck)
+		for _, r in Gear.Rarities do if odds[r.id] then table.insert(parts, r.id .. " " .. pct(odds[r.id])) end end
+		row.odds.Text = table.concat(parts, " • ") .. (c.relics and "  • can drop 🔮 relics" or "")
 		if not owned[c.die] then
 			b.Text, b.BackgroundColor3 = "🔒 " .. Dice.ById[c.die].name, Color3.fromRGB(60, 60, 70)
 		else
-			b.Text = "Open $" .. short(c.cost)
-			b.BackgroundColor3 = cash >= c.cost and Color3.fromRGB(50, 180, 70) or Color3.fromRGB(150, 60, 60)
+			b.Text = "Open $" .. short(price)
+			b.BackgroundColor3 = cash >= price and Color3.fromRGB(50, 180, 70) or Color3.fromRGB(150, 60, 60)
 		end
 	end
 end
 state:GetAttributeChangedSignal("Cash"):Connect(function() if shop.Visible then refreshShop() end end)
 state:GetAttributeChangedSignal("Dice"):Connect(refreshShop)
+state:GetAttributeChangedSignal("ChestLuck"):Connect(function() if shop.Visible then refreshShop() end end)
 state:GetAttributeChangedSignal("Materials"):Connect(function() if shop.Visible then refreshShop() end end)
 
 -- GEAR BAG
@@ -147,7 +156,7 @@ local function refreshBag()
 	if selected and not gear[selected] then selected = nil end
 	local items = {}
 	for uid, g in gear do table.insert(items, { uid = uid, g = g }) end
-	table.sort(items, function(a, b) return Gear.RarityById[a.g.r].income > Gear.RarityById[b.g.r].income end)
+	table.sort(items, function(a, b) return Gear.power(a.g) > Gear.power(b.g) end)
 	bagMsg.TextColor3 = Color3.fromRGB(220, 220, 230)
 	bagMsg.Text = #items == 0 and "No gear yet. Open chests at the Chest Shop!" or (selected and "Pick a monster to equip it on" or "Tap gear, then pick a monster")
 	for i, it in items do
@@ -157,7 +166,7 @@ local function refreshBag()
 		b:FindFirstChildOfClass("UIStroke").Color = it.uid == selected and Color3.new(1, 1, 1) or r.color
 		b:FindFirstChildOfClass("UIStroke").Thickness = it.uid == selected and 5 or 3
 		text("TextLabel", b, Gear.TypeById[it.g.t].icon .. " " .. Gear.name(it.g), UDim2.new(1, -8, 0.4, 0), UDim2.fromOffset(4, 4), r.color)
-		text("TextLabel", b, "+" .. pct(r.income) .. " income & stats", UDim2.new(1, -8, 0.26, 0), UDim2.new(0, 4, 0.44, 0), Color3.fromRGB(120, 255, 120))
+		text("TextLabel", b, "+" .. pct(Gear.power(it.g)) .. "  " .. Gear.secondaryText(it.g), UDim2.new(1, -8, 0.26, 0), UDim2.new(0, 4, 0.44, 0), Color3.fromRGB(120, 255, 120))
 		local wearer = it.g.m and mons[it.g.m]
 		text("TextLabel", b, wearer and ("On " .. nameOf(wearer)) or "In bag", UDim2.new(1, -8, 0.22, 0), UDim2.new(0, 4, 0.72, 0), Color3.fromRGB(190, 190, 200))
 		b.MouseButton1Click:Connect(function() selected = it.uid refreshBag() end)
@@ -184,6 +193,16 @@ local function refreshBag()
 		end)
 	end
 	if #targets == 0 then bagMsg.Text = "Place a monster on your base or pick a battle team first" end
+	local g = gear[selected]
+	if g.t == "relic" and not state:GetAttribute("RelicSlot") then bagMsg.Text = "Relics need the Equipment Slots node (Utility branch)" end
+	if (g.lvl or 1) < Gear.MAX_LEVEL then
+		local up = btn(slotBar, UDim2.fromOffset(110, 60), UDim2.new(), Color3.fromRGB(60, 160, 70))
+		up.Text = "Upgrade\n$" .. short(Gear.upgradeCost(g))
+		up.MouseButton1Click:Connect(function()
+			local ok, err = ChestAction:InvokeServer("upgrade", selected)
+			if not ok then bagMsg.TextColor3 = Color3.fromRGB(255, 140, 140) bagMsg.Text = err end
+		end)
+	end
 	local un = btn(slotBar, UDim2.fromOffset(92, 60), UDim2.new(), Color3.fromRGB(150, 60, 60))
 	un.Text = "Unequip"
 	un.MouseButton1Click:Connect(function() ChestAction:InvokeServer("unequip", selected) end)

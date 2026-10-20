@@ -71,7 +71,7 @@ function P.eventMult(events, effect: string): number
 end
 
 -- COSMETICS: titles (above your head) and auras (particles). Never affect gameplay.
--- cash = buy price; gamepass / product = Roblox ids for paid ones (nil = not on sale yet). Paid items are
+-- cash = buy price; paid = sold for Robux via gamepass / product id (nil id = not on sale yet). Paid items are
 -- fixed, never randomized. Earned ones (milestones, daily) have neither.
 P.Cosmetics = {
 	{ id = "title_rookie", kind = "title", name = "Rookie Roller", cash = 10e3, color = C(200, 200, 200) },
@@ -79,12 +79,12 @@ P.Cosmetics = {
 	{ id = "title_mythic", kind = "title", name = "Mythic Hunter", cash = 1e9, color = C(255, 60, 90) },
 	{ id = "title_collector", kind = "title", name = "Master Collector", color = C(255, 200, 60) },
 	{ id = "title_weekly", kind = "title", name = "Weekly Champion", color = C(120, 230, 255) },
-	{ id = "title_vip", kind = "title", name = "VIP", gamepass = nil, color = C(255, 215, 0) },
+	{ id = "title_vip", kind = "title", name = "VIP", paid = true, gamepass = nil, color = C(255, 215, 0) },
 	{ id = "aura_ember", kind = "aura", name = "Ember Aura", cash = 100e6, color = C(255, 120, 40) },
 	{ id = "aura_meadow", kind = "aura", name = "Meadow Aura", color = C(90, 220, 90) },
 	{ id = "aura_solar", kind = "aura", name = "Solar Aura", color = C(255, 230, 120) },
 	{ id = "aura_glitch", kind = "aura", name = "Glitch Aura", color = C(0, 255, 120) },
-	{ id = "aura_supporter", kind = "aura", name = "Supporter Aura", product = nil, color = C(255, 120, 255) },
+	{ id = "aura_supporter", kind = "aura", name = "Supporter Aura", paid = true, product = nil, color = C(255, 120, 255) },
 }
 P.CosmeticById = {}
 for _, c in P.Cosmetics do P.CosmeticById[c.id] = c end

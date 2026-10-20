@@ -39,7 +39,7 @@ R.stubs = { MonsterModel = { build = function(def, v)
 	m.PrimaryPart = p
 	return m
 end } }
-for _, s in { "PlotAssigner", "MonsterService", "ChestService", "BattleService" } do R.runScript(SRC .. s .. ".server.luau", s) end
+for _, s in { "PlotAssigner", "MonsterService", "ChestService", "BattleService", "ProgressService", "LeaderboardService" } do R.runScript(SRC .. s .. ".server.luau", s) end
 R.run(1)
 local Game = R.req(R.SSS.Game)
 local F = R.req(R.RS.Monster.Formulas)
@@ -241,6 +241,110 @@ local cashS = p.data.Cash
 ok, err = R.invoke("InventoryAction", A, "sell", { f1 }, true)
 check(ok and not p.data.Monsters[f1] and p.data.Cash > cashS, "confirmed sell pays")
 check(p.data.Discovered.frostfang ~= nil, "codex keeps the discovery after selling")
+
+print("progress: quests, milestones, daily, events, boosts")
+local P = R.req(R.RS.Monster.ProgressConfig)
+local T = R.req(R.RS.Monster.SkillTree)
+p.data.Rolls = 10
+local cq = p.data.Cash
+Game.Changed:Fire(A)
+R.run(0.5)
+check(p.data.Quests.roll10 == true and p.data.Cash >= cq + 500, "roll10 quest auto-completed with its reward")
+for i = 1, 12 do p.data.Discovered[Config.Monsters[i].id] = { Normal = true } end
+Game.Changed:Fire(A)
+R.run(0.5)
+check(p.data.Milestones.unique10 == true, "unique-10 milestone awarded")
+local m25 = Game.capacity(p)
+for i = 13, 30 do p.data.Discovered[Config.Monsters[i].id] = { Normal = true } end
+Game.Changed:Fire(A)
+R.run(0.5)
+check(p.data.Milestones.unique25 and Game.capacity(p) == m25 + 25, "milestone effect stacks through Game.stat")
+local okd, res = R.invoke("ProgressAction", A, "daily")
+check(okd and res.day == 1 and p.data.Daily.day == 1, "daily day 1 claimed")
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "daily")) == false, "no second claim the same day")
+for day = 2, 4 do
+	R.timeOffset += 86400
+	R.run(0.6)
+	okd, res = R.invoke("ProgressAction", A, "daily")
+	check(okd and res.day == day, "daily streak day " .. day)
+end
+check(p.data.Boosts.luck and p.data.Boosts.luck.mult == 2, "day 4 luck boost")
+local luckBoosted = Game.luck(p)
+p.data.Boosts.luck.ends = os.time and 0 or 0
+check(Game.luck(p) < luckBoosted, "boost expires")
+local ipsEv = Game.incomePerSec(p)
+Game.events = { P.EventById.weekend_income }
+check(math.abs(Game.incomePerSec(p) / ipsEv - 2) < 1e-9 and math.abs(Game.incomePerSec(p, true) - ipsEv) < 1e-9, "event doubles live income, not offline")
+Game.events = {}
+R.run(0.6)
+check(select(1, R.invoke("ProgressAction", A, "travel", "DiceShop")) == false, "travel needs Portal Mastery")
+
+print("evolution tree ranks, ascension, respec")
+p.data.Cash = 1e6
+R.run(0.3)
+check(select(1, R.invoke("BuySkill", A, "lucky_charm")) == true, "buy luck node")
+local skillSpent = p.data.SkillSpent
+R.run(0.3)
+check(select(1, R.invoke("BuySkill", A, "eternal_wealth", "ascension")) == true, "ascension node bought with AP")
+check(p.data.Ascension.eternal_wealth == 1 and p.data.AscensionPoints == 6, "AP spent: " .. p.data.AscensionPoints)
+local ipsA = Game.incomePerSec(p)
+R.run(5.5)
+local cashR = p.data.Cash
+local okR, refund = R.invoke("BuySkill", A, "respec")
+check(okR and refund == math.floor(skillSpent * 0.75) and p.data.Skills.coin_collector == nil and p.data.SkillSpent == 0, "respec refunds 75%")
+check(p.data.Ascension.eternal_wealth == 1, "respec keeps the Ascension Tree")
+
+print("gear levels, relics, batch chests")
+local gu = uid
+local lvl0 = p.data.Gear[gu].lvl
+local pow0 = R.req(R.RS.Monster.GearConfig).power(p.data.Gear[gu])
+Game.addCash(p, 1e7)
+R.run(0.3)
+check(select(1, R.invoke("ChestAction", A, "upgrade", gu)) and p.data.Gear[gu].lvl == lvl0 + 1, "gear upgraded")
+check(R.req(R.RS.Monster.GearConfig).power(p.data.Gear[gu]) > pow0, "gear power up")
+local relic = Game.addGear(p, "Epic", "relic")
+R.run(0.3)
+check(select(1, R.invoke("ChestAction", A, "equip", relic, iid)) == false, "relic slot locked without Equipment Slots")
+p.data.Skills.equipment_slots = 1
+R.run(0.3)
+check(select(1, R.invoke("ChestAction", A, "equip", relic, iid)) == true, "relic equips once unlocked")
+local before10 = Game.count(p.data.Gear)
+R.run(0.3)
+local ok10, got10 = R.invoke("ChestAction", A, "open", "wooden", 10)
+check(ok10 and #got10 == 10 and Game.count(p.data.Gear) >= before10 + 10 and p.data.Stats.chests >= 11, "batch of 10: " .. tostring(ok10 and p.data.Stats.chests or got10))
+
+print("team presets + arena")
+p.data.Skills.extra_team_preset = 1
+R.run(0.3)
+check(select(1, R.invoke("BattleAction", A, "team", { iid2 }, 2)) == true and p.data.BattleTeams[2][1] == iid2, "preset 2 saved")
+check(select(1, R.invoke("BattleAction", A, "team", { iid2 }, 3)) == false, "preset 3 locked")
+R.run(0.3)
+check(select(1, R.invoke("BattleAction", A, "preset", 2)) == true and Game.team(p)[1] == iid2, "preset 2 active")
+R.run(0.3)
+check(select(1, R.invoke("BattleAction", A, "preset", 1)) == true, "back to preset 1")
+R.run(0.3)
+local okA = R.invoke("BattleAction", A, "start", "grass1")
+local arenas = R.game.Workspace:FindFirstChild("Arenas")
+check(okA and arenas and #arenas:GetChildren() == 1, "arena built for the battle")
+R.run(0.3)
+R.invoke("BattleAction", A, "leave")
+check(#arenas:GetChildren() == 0, "arena cleaned up on leave")
+
+print("cosmetics + leaderboard")
+R.run(0.4)
+check(select(1, R.invoke("ShopAction", A, "equip", "title_rookie")) == false, "can't equip unowned")
+R.run(0.4)
+check(select(1, R.invoke("ShopAction", A, "buy", "title_rookie")) == true and p.data.Cosmetics.title_rookie, "bought title")
+R.run(0.4)
+check(select(1, R.invoke("ShopAction", A, "equip", "title_rookie")) == true and p.data.Equipped.title == "title_rookie", "equipped title")
+R.run(0.4)
+check(select(1, R.invoke("ShopAction", A, "buy", "title_weekly")) == false, "earned-only title not for sale")
+check(select(1, R.invoke("ShopAction", A, "premium", "title_vip")) == false, "paid item without an id is not on sale")
+R.run(12)
+local lb = R.RS:GetAttribute("Leaderboards")
+check(lb and R.decode(lb).boards[1].entries[1] ~= nil, "leaderboard published (server fallback)")
+check(R.decode(R.encode(p.data)) ~= nil, "profile still JSON-serializable")
 
 print("22-23. leave + rejoin: everything persists, offline earnings capped")
 local saved = { cash = p.data.Cash, mons = Game.count(p.data.Monsters), placed1 = p.data.Placed["1"], gear = Game.count(p.data.Gear), reb = p.data.Rebirths }

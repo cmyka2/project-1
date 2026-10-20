@@ -7,6 +7,7 @@ local Dice = require(RS.Monster:WaitForChild("DiceConfig"))
 local BattleAction = RS.Monster:WaitForChild("BattleAction")
 local player = Players.LocalPlayer
 local state = player:WaitForChild("PlayerGui"):WaitForChild("State") -- private mirror of my save, written by the server
+local ROLE = { Attacker = "⚔️", Tank = "🛡", Healer = "➕", Support = "🎶", Controller = "🌀", Specialist = "🎯" }
 local ICON = { Nature = "🌿", Earth = "🟫", Water = "💧", Fire = "🔥", Lightning = "⚡", Light = "✨", Shadow = "🌑", Cosmic = "🌌" }
 
 local function short(n)
@@ -55,7 +56,8 @@ stageList.BorderSizePixel = 0 stageList.CanvasSize = UDim2.new() stageList.Autom
 local sll = Instance.new("UIListLayout") sll.Padding = UDim.new(0, 8) sll.Parent = stageList
 
 -- BATTLE SCREEN
-local screen = Instance.new("Frame") screen.Size = UDim2.fromScale(1, 1) screen.BackgroundColor3 = Color3.fromRGB(18, 22, 30) screen.BackgroundTransparency = 0.08
+-- mostly see-through: the server builds a 3D arena around you for each battle
+local screen = Instance.new("Frame") screen.Size = UDim2.fromScale(1, 1) screen.BackgroundColor3 = Color3.fromRGB(18, 22, 30) screen.BackgroundTransparency = 0.7
 screen.Visible = false screen.Parent = gui
 local title = text("TextLabel", screen, "", UDim2.fromScale(0.6, 0.06), UDim2.fromScale(0.2, 0.02))
 local turnL = text("TextLabel", screen, "", UDim2.fromScale(0.8, 0.05), UDim2.fromScale(0.1, 0.43), Color3.fromRGB(255, 220, 90))
@@ -101,6 +103,7 @@ local function card(parent, u, i, active)
 	bar(c, UDim2.fromOffset(6, 84), Color3.fromRGB(255, 200, 50), u.energy / 100)
 	local tags = {}
 	if u.boss then table.insert(tags, "👑") end
+	if u.role then table.insert(tags, ROLE[u.role] or "") end
 	if u.defending then table.insert(tags, "🛡️ Defending") end
 	if u.shield > 0 then table.insert(tags, "🔰" .. u.shield) end
 	for name, left in u.status do
@@ -152,8 +155,22 @@ end
 
 local function refreshStages()
 	for _, ch in stageList:GetChildren() do if ch:IsA("GuiObject") then ch:Destroy() end end
-	local prog, dice = decode("BattleProgress"), decode("Dice")
+	local prog, dice, teams = decode("BattleProgress"), decode("Dice"), decode("Teams")
 	local order = 0
+	-- team presets (Extra Team Preset node adds more); pick one, edit members in the BAG
+	local presets = teams.presets or 1
+	local bar = Instance.new("Frame") bar.Size = UDim2.new(1, 0, 0, 44) bar.BackgroundTransparency = 1 bar.LayoutOrder = 0 bar.Parent = stageList
+	local bl = Instance.new("UIListLayout") bl.FillDirection = Enum.FillDirection.Horizontal bl.Padding = UDim.new(0, 8) bl.Parent = bar
+	for k = 1, presets do
+		local n = teams.list and teams.list[k] and #teams.list[k] or 0
+		local b = btn(bar, "Team " .. k .. " (" .. n .. "/3)", UDim2.fromOffset(150, 40), UDim2.new(),
+			k == (teams.active or 1) and Color3.fromRGB(60, 140, 230) or Color3.fromRGB(70, 70, 80))
+		b.MouseButton1Click:Connect(function()
+			local ok, err = BattleAction:InvokeServer("preset", k)
+			stageMsg.Text = ok and ("Team " .. k .. " selected. Edit it in the BAG.") or err
+			refreshStages()
+		end)
+	end
 	for _, region in B.Regions do
 		local dieOk = not region.requiresDie or dice[region.requiresDie]
 		local h = text("TextLabel", stageList, region.icon .. " " .. region.name .. (dieOk and "" or ("  (needs the " .. Dice.ById[region.requiresDie].name .. ")")),
@@ -179,6 +196,7 @@ local function refreshStages()
 		end
 	end
 end
+state:GetAttributeChangedSignal("Teams"):Connect(function() if stages.Visible then refreshStages() end end)
 state:GetAttributeChangedSignal("BattleProgress"):Connect(function() if stages.Visible then refreshStages() end end)
 
 local function leave()

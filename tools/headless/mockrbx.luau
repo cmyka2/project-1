@@ -133,7 +133,7 @@ local IsA = {
 	TextLabel = { GuiObject = true }, TextButton = { GuiObject = true, GuiButton = true }, Frame = { GuiObject = true },
 	NumberValue = { ValueBase = true }, IntValue = { ValueBase = true },
 }
-local EVENTS = { Triggered = true, CharacterAdded = true, Event = true, Destroying = true, DescendantAdded = true, PlayerAdded = true, PlayerRemoving = true }
+local EVENTS = { PromptGamePassPurchaseFinished = true, OnClientEvent = true, Triggered = true, CharacterAdded = true, Event = true, Destroying = true, DescendantAdded = true, PlayerAdded = true, PlayerRemoving = true }
 local Methods = {}
 local function newInst(class, name)
 	local o = { ClassName = class, Name = name or class, _kids = {}, _attrs = {}, _asig = {}, _ev = {} }
@@ -366,7 +366,13 @@ svc("DataStoreService").GetDataStore = function() return Store end
 game.JobId = "server-A"
 function game:GetService(n) return services[n] end
 function game:BindToClose(fn) R.closers = R.closers or {} table.insert(R.closers, fn) end
+local mps = svc("MarketplaceService")
+mps.UserOwnsGamePassAsync = function() return false end
+mps.PromptGamePassPurchase = function() end
+mps.PromptProductPurchase = function() end
+rawget(mps, "_ev").PromptGamePassPurchaseFinished = newSignal()
 local playerList = {}
+function Players:GetPlayerByUserId(id) for _, p in playerList do if p.UserId == id and p.Parent then return p end end return nil end
 function Players:GetPlayers() local o = {} for _, p in playerList do if p.Parent then table.insert(o, p) end end return o end
 
 local Random = {}

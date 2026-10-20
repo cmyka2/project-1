@@ -10,7 +10,8 @@ A.Categories = {
 }
 -- ids the code asks for today, per category (Monsters come from MonsterConfig)
 A.Wanted = {
-	Shops = { "summon_station", "dice_shop", "chest_shop", "upgrade_tree", "rebirth_altar", "index_codex" },
+	Shops = { "summon_station", "dice_shop", "chest_shop", "upgrade_tree", "rebirth_altar", "index_codex",
+		"daily_rewards", "leaderboard_board", "cosmetic_shop" },
 	Statues = { "main_statue" },
 }
 local registered = {}
