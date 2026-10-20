@@ -83,7 +83,7 @@ end
 -- elevator pads (back of the centre walkway on every floor) with one prompt per other unlocked floor
 local function floorPivot(plot, f)
 	local base = plot:FindFirstChild("Base")
-	return base and base.CFrame * CFrame.new(0, FLOOR_H * (f - 1) + 2, -22)
+	return base and base.CFrame * CFrame.new(0, FLOOR_H * (f - 1) + 2, -26)
 end
 local function buildElevators(plot, floors)
 	for _, e in plot:GetChildren() do if e.Name == "Elevator" then e:Destroy() end end
