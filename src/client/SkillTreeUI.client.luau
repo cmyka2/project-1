@@ -14,7 +14,7 @@ local LOCKED, AVAIL = Color3.fromRGB(32, 32, 38), Color3.fromRGB(52, 52, 62)
 local SQ3 = math.sqrt(3)
 
 local function fmt(n)
-	for _, u in { { 1e15, "q" }, { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
+	for _, u in { { 1e21, "sx" }, { 1e18, "qn" }, { 1e15, "qd" }, { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
 		if n >= u[1] then return (("%.1f"):format(n / u[1]):gsub("%.0$", "")) .. u[2] end
 	end
 	return tostring(math.floor(n))

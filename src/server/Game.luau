@@ -20,7 +20,7 @@ local Traits = require(M.TraitConfig)
 local Data = require(script.Parent.DataService)
 
 local Game = {}
-Game.MAX_CASH = 1e15 -- ponytail: plain numbers; switch to a big-number format before costs pass ~1e15
+Game.MAX_CASH = 1e24 -- plain doubles: past 2^53 (~9e15) cents stop being exact, which an idle economy never notices
 Game.BASE_CAPACITY, Game.MAX_GEAR, Game.TEAM_SIZE = 100, 200, 3
 Game.BaseChanged = Instance.new("BindableEvent") -- (player) that player's plot needs a re-render
 Game.Changed = Instance.new("BindableEvent") -- (player) progress counters moved: quests/milestones re-check
@@ -311,7 +311,7 @@ function Game.notify(player: Player, text: string)
 end
 
 function Game.short(n: number)
-	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
+	for _, u in { { 1e21, "sx" }, { 1e18, "qn" }, { 1e15, "qd" }, { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
 		if n >= u[1] then return (("%.1f"):format(n / u[1]):gsub("%.0$", "")) .. u[2] end
 	end
 	return n < 100 and (("%.1f"):format(n):gsub("%.0$", "")) or tostring(math.floor(n))

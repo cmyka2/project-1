@@ -6,8 +6,13 @@ Rebirth.Keeps = { "Monsters & levels", "Index", "Placed monsters", "Gear", "Dice
 Rebirth.INCOME_BONUS = 0.10 -- +10% income per rebirth (its own bracket, see Formulas)
 Rebirth.LUCK_BONUS = 0.02 -- +2% luck per rebirth, added to skill luck before diminishing returns
 
+-- cost curve, tuned with tools/headless/pacing.luau: a greedy active player's first rebirth lands around
+-- 10-15 minutes, floor 2 (rebirth 6) after roughly an hour and a half, and cycles stay meaningful instead of chaining.
+-- Steep x6 per rebirth early (dice make income jump), gentler x2.5 after rebirth 6 so floor 3 stays reachable.
+Rebirth.BASE_COST, Rebirth.EARLY_GROWTH, Rebirth.LATE_GROWTH, Rebirth.BEND = 500000, 6, 2.5, 6
 function Rebirth.cost(rebirths: number)
-	return math.floor(25000 * 3 ^ rebirths)
+	local early = math.min(rebirths, Rebirth.BEND)
+	return math.floor(Rebirth.BASE_COST * Rebirth.EARLY_GROWTH ^ early * Rebirth.LATE_GROWTH ^ (rebirths - early))
 end
 -- stage = battle stage that must be cleared first (nil = none)
 -- count monsters of at least tier minTier must be owned (kept, not consumed), like Steal a Brainrot's rebirths:

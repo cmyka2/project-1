@@ -11,7 +11,7 @@ local Config = require(M:WaitForChild("MonsterConfig"))
 local Mon = require(M:WaitForChild("MonetizationConfig"))
 
 local function short(n)
-	for _, u in { { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
+	for _, u in { { 1e21, "sx" }, { 1e18, "qn" }, { 1e15, "qd" }, { 1e12, "t" }, { 1e9, "b" }, { 1e6, "m" }, { 1e3, "k" } } do
 		if n >= u[1] then return (("%.1f"):format(n / u[1]):gsub("%.0$", "")) .. u[2] end
 	end
 	return tostring(math.floor(n))
