@@ -1,0 +1,12 @@
+MONSTER ROLL: RISE OF THE MYTHICS
+
+1. Open MonsterRoll.rbxl in Roblox Studio (File > Open from File). It contains the whole game.
+2. Press Play. The island, bases and shops are built when the game starts.
+3. To publish: File > Publish to Roblox, then Game Settings > Security >
+   Enable Studio Access to API Services (for saving), and Places > Max Players = 8.
+
+Everything else in this folder is the source code and documentation:
+  README.md      overview and setup
+  docs/          architecture, formulas, config guide, asset import guide, asset checklist, test report
+  src/           all game code (edit with Rojo; see README Option B)
+  tests/         automated tests

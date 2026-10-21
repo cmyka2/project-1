@@ -1,14 +1,92 @@
 {
-  "name": "project-1",
+  "name": "MonsterRoll",
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
-      "Monster": { "$path": "src/shared/Monster" }
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Assets": {
+        "$className": "Folder",
+        "MonsterModels": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true
+        },
+        "EnemyModels": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true
+        },
+        "NPCModels": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true
+        },
+        "Effects": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true
+        },
+        "Animations": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true
+        },
+        "$ignoreUnknownInstances": true
+      }
     },
-    "ServerScriptService": { "$path": "src/server" },
-    "ServerStorage": { "$path": "src/serverstorage" },
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+    "ServerStorage": {
+      "MonsterModels": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
+      },
+      "EnemyModels": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
+      },
+      "NPCModels": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
+      },
+      "MapTemplates": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
+      },
+      "AssetTemplates": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
+      },
+      "$ignoreUnknownInstances": true
+    },
     "StarterPlayer": {
-      "StarterPlayerScripts": { "$path": "src/client" }
+      "$properties": {
+        "EnableMouseLockOption": false
+      },
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    },
+    "Workspace": {
+      "$properties": {
+        "StreamingEnabled": false
+      },
+      "$ignoreUnknownInstances": true
+    },
+    "Lighting": {
+      "$properties": {
+        "Technology": "Future",
+        "Brightness": 2.4,
+        "ClockTime": 14.2,
+        "GlobalShadows": true
+      }
+    },
+    "Players": {
+      "$properties": {
+        "CharacterAutoLoads": true
+      }
     }
   }
 }
