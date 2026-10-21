@@ -467,23 +467,6 @@ end
 
 -- Districts -------------------------------------------------------------------------
 
-local function buildTerrain()
-	local terrain = Workspace.Terrain
-	local size = math.min(W.OceanSize, 2400)
-	pcall(function()
-		terrain:FillBlock(CFrame.new(0, -W.OceanDepth - 4, 0), Vector3.new(size, 8, size), Enum.Material.Sand)
-		terrain:FillBlock(
-			CFrame.new(0, -W.OceanDepth / 2 - 1, 0),
-			Vector3.new(size, W.OceanDepth, size),
-			Enum.Material.Water
-		)
-		terrain.WaterColor = rgb(40, 150, 200)
-		terrain.WaterTransparency = 0.4
-		terrain.WaterWaveSize = 0.15
-		terrain.WaterReflectance = 0.3
-	end)
-end
-
 local function buildIsland(world: Folder)
 	if world:FindFirstChild("Island") then
 		return
@@ -1250,6 +1233,215 @@ local function buildPlots(world: Folder): { [number]: PlotInfo }
 	return plots
 end
 
+-- Old hub -------------------------------------------------------------------------------
+-- The original hand-built hub (Workspace.Hub, ground at Y 20.4) is kept as the map. What it
+-- lacks is built by the normal district builders in a scratch folder, then moved onto free
+-- spots of it. Old buildings keep their look and get wired to the new panels.
+
+local OLD_GROUND = 20.4
+local OLD_PANELS = {
+	DiceShop = "Roll",
+	SummonArea = "Roll",
+	ChestShop = "Chests",
+	UpgradeTree = "Skills",
+	RebirthAltar = "Rebirth",
+	Index = "Codex",
+	Leaderboards = "Leaderboards",
+	DailyRewards = "Daily",
+	EventPortal = "Events",
+}
+
+local function oldSpot(x: number, z: number, faceZ: number): CFrame
+	local p = Vector3.new(x, OLD_GROUND, z)
+	return CFrame.lookAt(p, p + Vector3.new(0, 0, faceZ))
+end
+
+-- new-only buildings -> spot on the old plaza (front faces the fountain)
+local OLD_ADDITIONS = {
+	FusionLab = oldSpot(65, -190, 1),
+	EquipmentForge = oldSpot(108, -190, 1),
+	CraftingWorkshop = oldSpot(151, -190, 1),
+	MonsterStorage = oldSpot(70, 205, -1),
+	TradingPost = oldSpot(155, 205, -1),
+	AscensionSpire = oldSpot(-65, 205, -1),
+}
+
+-- Old plots: 78x62 base, front +Z. Their slot pads go; PlotService places its own.
+local function fitOldPlot(m: Model, index: number, parent: Instance): PlotInfo
+	m.Parent = parent
+	m:SetAttribute("PlotIndex", index)
+	for _, d in m:GetChildren() do
+		if d.Name:match("^Slot") or d.Name:match("^Collect") then
+			d:Destroy()
+		end
+	end
+	local base = m:FindFirstChild("Base") :: BasePart
+	base.Name = "Floor1"
+	base:SetAttribute("Floor", 1)
+	base:AddTag("PlotFloor")
+	-- new plot space: front = -Z, origin 4 studs behind center so the slot grid clears the front wall
+	local origin = base.CFrame * CFrame.new(0, base.Size.Y / 2 - 1, -4) * CFrame.Angles(0, math.pi, 0)
+	local originPart = block("Origin", Vector3.one, origin, PALETTE.White, Enum.Material.SmoothPlastic, m)
+	BuildKit.noCollide(originPart)
+	originPart.Transparency = 1
+	local sign = m:FindFirstChild("OwnerSign")
+	if sign then
+		sign.Name = "Sign"
+		for _, g in sign:GetChildren() do
+			if g:IsA("SurfaceGui") then
+				g.Name = if g.Face == Enum.NormalId.Front then "Label" else "BackLabel"
+				local text = g:FindFirstChild("Label")
+				if text then
+					text.Name = "Text"
+				end
+			end
+		end
+	end
+	local chest = m:FindFirstChild("UpgradeChest")
+	local prompt = chest and chest:FindFirstChildOfClass("ProximityPrompt")
+	if prompt then
+		prompt:SetAttribute("Action", "Panel")
+		prompt:SetAttribute("Panel", "Base")
+		prompt:SetAttribute("PlotIndex", index)
+	end
+	local point = m:FindFirstChild("SpawnPoint")
+	local spawnPad = Instance.new("SpawnLocation")
+	spawnPad.Name = "PlotSpawn"
+	spawnPad.Size = Vector3.new(10, 1, 10)
+	spawnPad.CFrame = if point and point:IsA("BasePart") then point.CFrame else origin * CFrame.new(0, 1.1, -20)
+	spawnPad.Anchored = true
+	spawnPad.Neutral = false
+	spawnPad.Enabled = false
+	spawnPad.Duration = 0
+	spawnPad.Transparency = 1
+	BuildKit.noCollide(spawnPad)
+	spawnPad.Parent = m
+	-- upper floors + elevators, sized to the old base
+	local w, d = base.Size.X - 4, base.Size.Z - 4
+	local wallColor = rgb(190, 200, 215)
+	for floorNumber = 2, 3 do
+		local y = (floorNumber - 1) * P.FloorHeight
+		local upper = block(
+			"Floor" .. floorNumber,
+			Vector3.new(w, 1.5, d),
+			origin * CFrame.new(0, y + 0.75, -4),
+			rgb(225, 225, 232),
+			Enum.Material.SmoothPlastic,
+			m
+		)
+		upper:SetAttribute("Floor", floorNumber)
+		upper:AddTag("PlotFloor")
+		for _, corner in { Vector2.new(-1, -1), Vector2.new(1, -1), Vector2.new(-1, 1), Vector2.new(1, 1) } do
+			block(
+				"Pillar" .. floorNumber,
+				Vector3.new(2, P.FloorHeight, 2),
+				origin * CFrame.new(corner.X * (w / 2 - 1), y - P.FloorHeight / 2, -4 + corner.Y * (d / 2 - 1)),
+				wallColor,
+				Enum.Material.Brick,
+				m
+			)
+		end
+		local railing = block(
+			"Railing" .. floorNumber,
+			Vector3.new(w, 3, 1),
+			origin * CFrame.new(0, y + 3, -4 + d / 2),
+			wallColor,
+			Enum.Material.SmoothPlastic,
+			m
+		)
+		railing.Transparency = 0.2
+	end
+	for floorNumber = 1, 3 do
+		local pad = cylinder(
+			"Elevator" .. floorNumber,
+			0.6,
+			7,
+			origin * CFrame.new(-30, (floorNumber - 1) * P.FloorHeight + 1.6, 20),
+			rgb(120, 220, 255),
+			Enum.Material.Neon,
+			m
+		)
+		pad:SetAttribute("Floor", floorNumber)
+		pad:SetAttribute("PlotIndex", index)
+		pad:AddTag("PlotElevator")
+		BuildKit.prompt(
+			pad,
+			"Change floor",
+			"Elevator",
+			{ Action = "Elevator", PlotIndex = index, Floor = floorNumber },
+			10
+		)
+	end
+	BuildKit.folder("Slots", m)
+	BuildKit.folder("Displays", m)
+	return { Index = index, Model = m, Origin = origin }
+end
+
+local function fitOldHub(world: Folder, hub: Instance): (CFrame, { [number]: PlotInfo })
+	local shops = hub:FindFirstChild("Shops") :: Instance
+	for name, panel in OLD_PANELS do
+		local m = shops:FindFirstChild(name)
+		for _, d in if m then m:GetDescendants() else {} do
+			if d:IsA("ProximityPrompt") then
+				d:SetAttribute("Action", "Panel")
+				d:SetAttribute("Panel", panel)
+			end
+		end
+	end
+	-- no premium panel in the new game yet
+	local premium = shops:FindFirstChild("PremiumShop")
+	for _, d in if premium then premium:GetDescendants() else {} do
+		if d:IsA("ProximityPrompt") then
+			d.Enabled = false
+		end
+	end
+
+	local scratch = BuildKit.folder("Scratch", world)
+	buildShops(scratch)
+	buildProgression(scratch)
+	buildPlaza(scratch)
+	local extras = BuildKit.folder("HubExtras", world)
+	local function moveTo(m: Model, ref: CFrame, target: CFrame)
+		m:PivotTo(target * ref:ToObjectSpace(m:GetPivot()))
+		m.Parent = extras
+	end
+	for name, target in OLD_ADDITIONS do
+		local m = scratch:FindFirstChild(name, true) :: Model
+		moveTo(m, (m:FindFirstChild("Floor") :: BasePart).CFrame * CFrame.new(0, -0.5, 0), target)
+	end
+	for name, pos in { QuestBoard = Vector3.new(-50, OLD_GROUND, 165), Achievements = Vector3.new(50, OLD_GROUND, 165) } do
+		local m = scratch:FindFirstChild(name, true) :: Model
+		moveTo(m, CFrame.new((m:FindFirstChild("Base") :: BasePart).Position - Vector3.new(0, 1.5, 0)), CFrame.new(pos))
+	end
+	local arena = scratch:FindFirstChild("BattleArena", true) :: Model
+	local stone = arena:FindFirstChild("BattleStone") :: BasePart
+	moveTo(arena, CFrame.new(stone.Position - Vector3.new(0, 2, 0)), CFrame.new(-155, OLD_GROUND, 200))
+	-- region gates in a row on the north-west of the plaza
+	local gates = scratch:FindFirstChild("RegionGates") :: Folder
+	gates.Parent = world
+	local count = #RegionConfig.Order
+	for i, regionId in RegionConfig.Order do
+		local gate = gates:FindFirstChild("Gate_" .. regionId) :: Model
+		local portal = gate:FindFirstChild("Portal") :: BasePart
+		local x = -185 + (i - 1) * 145 / math.max(1, count - 1)
+		gate:PivotTo(oldSpot(x, -185, 1) * (portal.CFrame * CFrame.new(0, -6.6, 0)):ToObjectSpace(gate:GetPivot()))
+	end
+	scratch:Destroy()
+
+	local plots: { [number]: PlotInfo } = {}
+	local plotFolder = BuildKit.folder("PlayerBasePlots", world)
+	local oldPlots = hub:FindFirstChild("Plots") :: Instance
+	for i = 1, P.Count do
+		local m = oldPlots:FindFirstChild("Plot" .. i)
+		if m and m:IsA("Model") then
+			plots[i] = fitOldPlot(m, i, plotFolder)
+		end
+	end
+	local spawn = hub:FindFirstChild("SpawnLocation", true)
+	local spawnCf = if spawn and spawn:IsA("BasePart") then spawn.CFrame else CFrame.new(0, OLD_GROUND, 150)
+	return spawnCf * CFrame.new(0, 3, 0), plots
+end
+
 -- Region islands ----------------------------------------------------------------------
 
 local function regionCenter(index: number): Vector3
@@ -1563,15 +1755,16 @@ function WorldBuilder.build(): WorldInfo
 		Caches = {},
 		EncounterPositions = {},
 	}
-	if not world:GetAttribute("TerrainBuilt") then
-		buildTerrain()
-		world:SetAttribute("TerrainBuilt", true)
+	local oldHub = Workspace:FindFirstChild("Hub")
+	if oldHub then
+		info.HubSpawn, info.Plots = fitOldHub(world, oldHub)
+	else
+		buildIsland(world)
+		info.HubSpawn = buildPlaza(world) * CFrame.new(0, 3, 0)
+		buildShops(world)
+		buildProgression(world)
+		info.Plots = buildPlots(world)
 	end
-	buildIsland(world)
-	info.HubSpawn = buildPlaza(world) * CFrame.new(0, 3, 0)
-	buildShops(world)
-	buildProgression(world)
-	info.Plots = buildPlots(world)
 	for _, regionId in RegionConfig.Order do
 		buildRegion(world, RegionConfig.Regions[regionId], info)
 	end

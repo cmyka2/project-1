@@ -47,8 +47,6 @@ local GameConfig = {
 		IslandSizeX = 640, -- east-west
 		IslandSizeZ = 820, -- north-south
 		IslandThickness = 30,
-		OceanSize = 3200,
-		OceanDepth = 40,
 		-- Out-of-bounds recovery: players beyond these limits are returned to safety
 		BoundsX = 560,
 		BoundsZ = 680,
@@ -65,7 +63,7 @@ local GameConfig = {
 		Gap = 22,
 		EdgeInset = 14, -- distance between island edge and plot back wall
 		FloorHeight = 22,
-		SlotSpacing = 14,
+		SlotSpacing = 12,
 		SlotColumns = 6,
 		SlotPadSize = 9,
 		MonsterDisplayHeight = 7, -- displayed models are scaled to this height
